@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#84cc16">
+  <title>MediQueue · API documentation</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/docs.css">
+  <script src="/assets/docs.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="header">
+    <a class="brand" href="/docs"><span class="brand-icon" aria-hidden="true">✳</span> MediQueue <span class="brand-label">developers</span></a>
+    <div class="header-actions"><span class="version" id="version">v1.1.0</span><a href="/openapi.json">OpenAPI <span aria-hidden="true">↗</span></a><a class="button small" href="/swagger">API playground <span aria-hidden="true">↗</span></a></div>
+    <button id="menu" class="menu" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+  </header>
+  <aside class="sidebar" id="sidebar">
+    <label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search endpoints…" aria-label="Search endpoints"><kbd>/</kbd></label>
+    <div class="nav-label">GETTING STARTED</div>
+    <nav aria-label="Introduction"><a class="nav-link active" href="#overview">Overview <span>↗</span></a><a class="nav-link" href="#quickstart">Quick start</a><a class="nav-link" href="#authentication">Authentication</a></nav>
+    <div class="nav-label resource-heading">API REFERENCE <span id="endpoint-count"></span></div>
+    <nav id="resource-nav" aria-label="API resources"><span class="muted">Loading API reference…</span></nav>
+    <div class="sidebar-footer"><span class="mini-logo">✳</span><div>Built for better patient flow.<br><span>One API. Every touchpoint.</span></div></div>
+  </aside>
+  <main id="main">
+    <article>
+      <section class="intro" id="overview">
+        <div class="eyebrow">DOCUMENTATION <span>/</span> OVERVIEW</div>
+        <div class="release"><span class="dot"></span> API v1 <span>·</span> Developer reference</div>
+        <h1>Less waiting.<br>More <span>possibilities.</span></h1>
+        <p class="lead">Build a smoother healthcare experience with MediQueue.<br class="desktop-break"> Everything you need to connect hospitals, people, and patient flow.</p>
+        <div class="hero-actions"><a class="button" href="#quickstart">Start building <span>→</span></a><a class="text-link" href="/swagger">Explore the API <span>↗</span></a></div>
+        <div class="features"><div><span class="feature-icon">⌘</span><strong>RESTful by design</strong><span>Predictable, versioned endpoints</span></div><div><span class="feature-icon">◇</span><strong>Scoped & secure</strong><span>Hospital and branch permissions</span></div><div><span class="feature-icon">↻</span><strong>Reliable queue commands</strong><span>Idempotent, audited operations</span></div></div>
+      </section>
+      <section id="quickstart" class="section">
+        <div class="eyebrow">GETTING STARTED</div><h2>From setup to your first request</h2><p class="muted">A few simple steps to get your integration moving.</p>
+        <div class="step"><span class="step-number">01</span><div class="step-content"><h3>Create your account</h3><p>Register a user, confirm their email, then sign in to receive an access token.</p><div class="code-panel"><div class="code-toolbar"><div class="tabs" role="tablist" aria-label="Example language"><button class="tab selected" role="tab" aria-selected="true" data-language="curl">cURL</button><button class="tab" role="tab" aria-selected="false" data-language="javascript">JavaScript</button><button class="tab" role="tab" aria-selected="false" data-language="python">Python</button></div><button class="copy" id="copy-example" aria-label="Copy registration example">Copy <span>⧉</span></button></div><pre><code id="register-example"></code></pre></div></div></div>
+        <div class="step"><span class="step-number">02</span><div class="step-content"><h3>Register your hospital</h3><p>Call <code>POST /v1/hospitals</code> with your access token. We create the hospital, its first branch, and your admin membership together.</p><div class="inline-note"><span>↳</span> Save the returned hospital and branch IDs for your scoped requests.</div></div></div>
+        <div class="step"><span class="step-number">03</span><div class="step-content"><h3>Make it flow</h3><p>Add departments, doctors, and schedules. Create a queue, check in a patient, and call the next token. Every command stays within your selected branch.</p><a class="text-link" href="#resource-queues">View queue endpoints <span>→</span></a></div></div>
+      </section>
+      <section id="authentication" class="section">
+        <div class="eyebrow">ACCESS & PERMISSIONS</div><h2>A secure foundation</h2><p class="muted">Use a Supabase access token. Permissions come from active database memberships, so a user cannot grant themselves a staff role.</p>
+        <div class="code-panel"><div class="code-toolbar"><span class="code-title">REQUEST HEADERS</span><span class="subtle-badge">Authenticated request</span></div><pre><code>Authorization: Bearer &lt;access_token&gt;
+X-Tenant-ID: &lt;hospital_id&gt;
+X-Branch-ID: &lt;branch_id&gt;</code></pre></div>
+        <p class="caption">A single active membership is selected automatically. For multiple branches, send the scope headers explicitly. Check-in and call-next also require an <code>Idempotency-Key</code>.</p>
+        <div class="permission-grid"><div><strong>Admin</strong><p>Hospital setup, team memberships, scheduling, and audit history.</p></div><div><strong>Reception</strong><p>Patient registration, appointments, visits, and queue check-in.</p></div><div><strong>Doctor / staff</strong><p>Scoped queue views and authorized token transitions.</p></div></div>
+      </section>
+      <section class="section" id="reference"><div class="eyebrow">API REFERENCE</div><h2>Every endpoint. One place.</h2><p class="muted">Browse the live API contract. Expand an endpoint for its inputs, response codes, and an example request.</p><div class="filter-bar"><span id="results-count" aria-live="polite">Loading endpoints…</span><a href="/openapi.json" download="mediqueue-openapi.json">Download OpenAPI ↓</a></div><div id="endpoints"></div><p class="empty hidden" id="empty">No endpoints match your search. Try a resource name or HTTP method.</p><p class="error hidden" id="load-error" role="alert">The API reference could not be loaded. <button id="retry">Try again</button></p></section>
+      <footer><a class="brand" href="#overview"><span class="mini-logo">✳</span> MediQueue</a><span>API documentation · ChamathDilshanC</span><a href="/health/ready">Check API readiness ↗</a></footer>
+    </article>
+    <aside class="toc"><div class="eyebrow">≡ &nbsp; ON THIS PAGE</div><nav aria-label="On this page"><a href="#overview" class="current">Overview</a><a href="#quickstart">Quick start</a><a href="#authentication">Authentication</a><a href="#reference">API reference</a></nav><div class="help-box"><span class="feature-icon">{ }</span><strong>Ready to try it?</strong><p>Send requests with the interactive API playground.</p><a href="/swagger">Open playground ↗</a></div></aside>
+  </main>
+  <div class="toast hidden" id="toast" role="status"></div>
+</body>
+</html>

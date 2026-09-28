@@ -1,5 +1,6 @@
 """Async SQLAlchemy engine, session dependency and declarative base."""
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy import event
 from sqlalchemy.orm import DeclarativeBase
@@ -14,8 +15,12 @@ if get_settings().database_url.startswith("sqlite"):
     def _attach_sqlite_schemas(dbapi_connection, _connection_record):
         """Emulate PostgreSQL namespaces for local SQLite connections."""
         cursor = dbapi_connection.cursor()
-        for schema in ("iam", "queue", "notifications"):
-            cursor.execute(f"ATTACH DATABASE ':memory:' AS {schema}")
+        database = engine.url.database
+        cursor.execute("PRAGMA foreign_keys=ON")
+        for schema in ("iam", "queue", "notifications", "scheduling"):
+            # Disk-backed namespaces survive reconnects and process restarts.
+            filename = ":memory:" if database in (None, "", ":memory:") else str(Path(database).resolve()) + f".{schema}.db"
+            cursor.execute(f"ATTACH DATABASE ? AS {schema}", (filename,))
         cursor.close()
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 

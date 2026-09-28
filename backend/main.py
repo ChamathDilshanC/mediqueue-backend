@@ -1,4 +1,5 @@
 """FastAPI application entry point for the MediQueue backend."""
+import hashlib
 import json
 import logging
 import uuid
@@ -6,14 +7,19 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Literal
 from fastapi import Depends, FastAPI, HTTPException, Header, status
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+from .identity import router as identity_router
+from .entities import router as entities_router, lock_branch
+from .portal import router as portal_router
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Principal, current_principal, require_scope
 from .db import get_session
-from .models import Queue, QueueToken, Visit, Patient, AuditEvent, OutboxEvent, IdempotencyKey
+from .models import Queue, QueueToken, Visit, Patient, Tenant, AuditEvent, OutboxEvent, IdempotencyKey
 from .settings import get_settings
 
 logger = logging.getLogger("mediqueue.api")
@@ -28,7 +34,8 @@ app = FastAPI(
         "`/health/ready` for database readiness, and `/docs` or `/redoc` for the "
         "interactive API reference."
     ),
-    version="1.0.0",
+    version="1.1.0",
+    docs_url="/swagger",
     contact={"name": "ChamathDilshanC"},
     license_info={"name": "Proprietary"},
     openapi_tags=[
@@ -40,9 +47,11 @@ app = FastAPI(
 )
 
 class CheckIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     patient_ref: str = Field(..., min_length=1, max_length=200, description="Non-clinical patient reference.")
 
 class Transition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     expected_version: int | None = Field(default=None, ge=1, description="Expected token version for optimistic concurrency.")
 
 class HealthResponse(BaseModel):
@@ -82,80 +91,7 @@ class StatusResponse(BaseModel):
     service: str
     version: str
     status: Literal["operational"] = "operational"
-    database: str = "available"
-
-@app.get("/", tags=["Health"], response_class=HTMLResponse, include_in_schema=False)
-async def service_info() -> HTMLResponse:
-    """Render a browser-friendly API index with links to every public endpoint."""
-    return HTMLResponse(
-        content=f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MediQueue API</title>
-  <style>
-    :root {{ color-scheme: light; font-family: Inter, system-ui, sans-serif; }}
-    body {{ margin: 0; background: #f4f7fb; color: #172033; }}
-    main {{ max-width: 1080px; margin: 36px auto; padding: 0 24px; }}
-    .hero, section {{ background: white; border: 1px solid #dce4ef; border-radius: 14px; padding: 26px; margin-bottom: 18px; box-shadow: 0 5px 20px #1720330d; }}
-    .hero {{ display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }}
-    h1 {{ margin: 0 0 8px; color: #1261a0; }} h2 {{ margin: 0 0 16px; }}
-    p {{ line-height: 1.6; }} a {{ color: #1261a0; font-weight: 600; text-decoration: none; }}
-    a:hover {{ text-decoration: underline; }}
-    .links {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }}
-    .links a {{ background: #1261a0; color: white; padding: 10px 14px; border-radius: 8px; }}
-    .status {{ background: #ecfdf3; border: 1px solid #a7e3bf; border-radius: 12px; padding: 16px 20px; min-width: 150px; }}
-    .status strong {{ display: block; color: #16804b; font-size: 18px; }} .status span {{ color: #456; font-size: 13px; }}
-    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }}
-    .card {{ border: 1px solid #e0e7f0; border-radius: 10px; padding: 16px; }}
-    .card h3 {{ margin: 0 0 8px; font-size: 15px; }} .card p {{ margin: 8px 0; font-size: 14px; color: #526176; }}
-    .method {{ display: inline-block; border-radius: 5px; padding: 3px 7px; margin-right: 7px; color: white; background: #16804b; font-size: 11px; font-weight: 700; }}
-    .post {{ background: #1261a0; }} .auth {{ color: #7a4b00; background: #fff3cd; border-radius: 5px; padding: 3px 7px; font-size: 11px; }}
-    code {{ background: #eef3f8; border-radius: 4px; padding: 2px 5px; }}
-    .ok {{ color: #16804b; font-weight: 700; }}
-    @media (max-width: 680px) {{ .hero {{ display: block; }} .status {{ margin-top: 20px; }} }}
-  </style>
-</head>
-<body>
-<main>
-  <div class="hero">
-    <div><h1>MediQueue API</h1>
-    <p>Tenant-scoped healthcare queue and patient-flow backend.</p>
-    <p class="ok">Version {app.version} · Live API</p>
-    <div class="links">
-      <a href="/docs">Swagger UI</a>
-      <a href="/redoc">ReDoc</a>
-      <a href="/openapi.json">OpenAPI JSON</a>
-      <a href="/health">Liveness</a>
-      <a href="/health/ready">Database readiness</a>
-      <a href="/status">Service status</a>
-    </div></div>
-    <div class="status"><strong>● Operational</strong><span>API is live</span><br><span>Supabase PostgreSQL</span></div>
-  </div>
-  <section>
-    <h2>System endpoints</h2>
-    <div class="grid">
-      <div class="card"><h3><a href="/status"><span class="method">GET</span><code>/status</code></a></h3><p>Service and database availability summary.</p><span class="auth">Public</span></div>
-      <div class="card"><h3><a href="/health"><span class="method">GET</span><code>/health</code></a></h3><p>Fast API liveness check.</p><span class="auth">Public</span></div>
-      <div class="card"><h3><a href="/health/ready"><span class="method">GET</span><code>/health/ready</code></a></h3><p>Runs <code>SELECT 1</code> against PostgreSQL.</p><span class="auth">Public</span></div>
-      <div class="card"><h3><a href="/v1/config/public"><span class="method">GET</span><code>/v1/config/public</code></a></h3><p>Allowlisted browser-safe configuration.</p><span class="auth">Public</span></div>
-    </div>
-  </section>
-  <section>
-    <h2>Application endpoints</h2>
-    <div class="grid">
-      <div class="card"><h3><a href="/docs#/Queues/snapshot_v1_queues__queue_id__snapshot_get"><span class="method">GET</span><code>/v1/queues/{{queue_id}}/snapshot</code></a></h3><p>Current non-identifying queue snapshot.</p><span class="auth">Supabase JWT · Staff</span></div>
-      <div class="card"><h3><a href="/docs#/Queues/check_in_v1_queues__queue_id__tokens_post"><span class="method post">POST</span><code>/v1/queues/{{queue_id}}/tokens</code></a></h3><p>Check in and create a waiting token.</p><span class="auth">JWT · Reception · Idempotency-Key</span></div>
-      <div class="card"><h3><a href="/docs#/Queues/call_next_v1_queues__queue_id__call_next_post"><span class="method post">POST</span><code>/v1/queues/{{queue_id}}/call-next</code></a></h3><p>Call the next waiting token transactionally.</p><span class="auth">JWT · Doctor/Staff · Idempotency-Key</span></div>
-      <div class="card"><h3><a href="/docs#/Tokens/transition_v1_tokens__token_id___action__post"><span class="method post">POST</span><code>/v1/tokens/{{token_id}}/{{action}}</code></a></h3><p>Recall, skip, or complete a token.</p><span class="auth">JWT · Authorized role</span></div>
-    </div>
-  </section>
-  <section><h2>Authentication and safety</h2><p>Use the <a href="/docs">interactive API documentation</a> for request schemas, response examples, authorization requirements, idempotency headers, and error responses. Patient-identifying data is not exposed by public display endpoints.</p></section>
-</main>
-</body>
-</html>"""
-    )
+    database: str = "not_checked"
 
 @app.get("/status", tags=["Health"], response_model=StatusResponse, summary="Get service status")
 async def service_status() -> StatusResponse:
@@ -212,14 +148,26 @@ async def scoped_queue(queue_id: uuid.UUID, p: Principal, db: AsyncSession) -> Q
 async def snapshot(queue_id: uuid.UUID, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)) -> dict:
     """Return non-identifying queue state for an authorized branch."""
     q = await scoped_queue(queue_id, p, db)
-    if not any(role in p.roles for role in ("staff", "reception", "admin")):
+    if not any(role in p.roles for role in ("staff", "reception", "doctor", "admin")):
         raise HTTPException(403, "Role denied")
-    rows = (await db.scalars(select(QueueToken).where(QueueToken.queue_id == q.id).order_by(QueueToken.token_number))).all()
+    rows = (await db.scalars(select(QueueToken).where(QueueToken.queue_id == q.id, QueueToken.business_date == business_date(q)).order_by(QueueToken.token_number))).all()
     return {"queueId": str(q.id), "tokens": [{"id": str(t.id), "label": f"{t.token_number:03d}", "status": t.status, "version": t.version} for t in rows]}
 
 async def save_event(db, token, p, action):
-    db.add(AuditEvent(tenant_id=token.tenant_id, actor_id=p.subject, action=action, entity_id=token.id, payload={"status": token.status}))
+    db.add(AuditEvent(tenant_id=token.tenant_id, actor_id=p.subject, action=action, entity_id=token.id, payload={"status": token.status, "branch_id": str(token.branch_id)}))
     db.add(OutboxEvent(tenant_id=token.tenant_id, event_type=f"token.{action.lower()}", payload={"tokenId": str(token.id), "status": token.status}))
+
+
+@app.get("/v1/tokens/{token_id}", tags=["Tokens"], response_model=TokenResponse)
+async def get_token(token_id: uuid.UUID, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
+    """Read a token's non-identifying state within the selected hospital branch."""
+    if not set(p.roles).intersection({"admin", "staff", "doctor", "reception"}):
+        raise HTTPException(403, "Role denied")
+    token = await db.scalar(select(QueueToken).where(QueueToken.id == token_id,
+        QueueToken.tenant_id == uuid.UUID(p.tenant_id), QueueToken.branch_id == uuid.UUID(p.branch_id)))
+    if not token:
+        raise HTTPException(404, "Token not found")
+    return token_result(token)
 
 def business_date(queue: Queue) -> date:
     """Calculate the queue business date in its branch timezone."""
@@ -235,29 +183,35 @@ def business_date(queue: Queue) -> date:
     summary="Check a patient into a queue",
     description="Creates a waiting token. `Idempotency-Key` is required and retries return the original result.",
 )
-async def check_in(queue_id: uuid.UUID, body: CheckIn, idempotency_key: str = Header(...), p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)) -> dict:
-    """Create one waiting token, replaying an idempotent result on retry."""
-    q = await scoped_queue(queue_id, p, db)
+async def check_in(queue_id: uuid.UUID, body: CheckIn, idempotency_key: str = Header(..., min_length=1, max_length=200), p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)) -> dict:
+    """Create a patient visit and waiting token in one audited transaction."""
     if not any(role in p.roles for role in ("staff", "reception", "admin")):
         raise HTTPException(403, "Role denied")
-    old = await db.scalar(select(IdempotencyKey).where(IdempotencyKey.tenant_id == q.tenant_id, IdempotencyKey.key == idempotency_key))
-    if old: return old.result
-    patient = Patient(tenant_id=q.tenant_id, external_ref=body.patient_ref); db.add(patient); await db.flush()
-    visit = Visit(tenant_id=q.tenant_id, branch_id=q.branch_id, patient_id=patient.id); db.add(visit); await db.flush()
-    # Lock the queue row so concurrent check-ins cannot allocate the same number.
+    await lock_branch(p, db)
+    q = await scoped_queue(queue_id, p, db)
+    await db.scalar(select(Tenant).where(Tenant.id == q.tenant_id).with_for_update())
     locked_queue = await db.scalar(select(Queue).where(Queue.id == q.id).with_for_update())
+    key, fingerprint = command_key(p, f"check-in:{q.id}", idempotency_key, body.model_dump())
+    previous = await replay(db, q.tenant_id, key, fingerprint)
+    if previous is not None:
+        return previous
+    patient = await db.scalar(select(Patient).where(Patient.tenant_id == q.tenant_id, Patient.external_ref == body.patient_ref))
+    if patient is None:
+        patient = Patient(tenant_id=q.tenant_id, external_ref=body.patient_ref)
+        db.add(patient)
+        await db.flush()
+    visit = Visit(tenant_id=q.tenant_id, branch_id=q.branch_id, patient_id=patient.id)
+    db.add(visit)
+    await db.flush()
     locked_queue.token_sequence += 1
-    token = QueueToken(tenant_id=q.tenant_id, branch_id=q.branch_id, queue_id=q.id, visit_id=visit.id, business_date=business_date(q), token_number=locked_queue.token_sequence); db.add(token); await db.flush()
-    result = {"id": str(token.id), "label": f"{token.token_number:03d}", "status": token.status, "version": token.version}
-    db.add(IdempotencyKey(tenant_id=q.tenant_id, key=idempotency_key, result=result))
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        existing = await db.scalar(select(IdempotencyKey).where(IdempotencyKey.tenant_id == q.tenant_id, IdempotencyKey.key == idempotency_key))
-        if existing:
-            return existing.result
-        raise HTTPException(409, "Concurrent idempotency conflict")
+    token = QueueToken(tenant_id=q.tenant_id, branch_id=q.branch_id, queue_id=q.id, visit_id=visit.id,
+                       business_date=business_date(q), token_number=locked_queue.token_sequence)
+    db.add(token)
+    await db.flush()
+    result = token_result(token)
+    remember(db, q.tenant_id, key, fingerprint, result)
+    await save_event(db, token, p, "CHECKED_IN")
+    await db.commit()
     return result
 
 @app.post(
@@ -268,18 +222,26 @@ async def check_in(queue_id: uuid.UUID, body: CheckIn, idempotency_key: str = He
     summary="Call the next waiting token",
     description="Selects one eligible waiting token under a database row lock and records audit/outbox events.",
 )
-async def call_next(queue_id: uuid.UUID, idempotency_key: str = Header(...), p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)) -> dict:
-    """Atomically call the oldest waiting token and emit audit/outbox records."""
-    q = await scoped_queue(queue_id, p, db)
+async def call_next(queue_id: uuid.UUID, idempotency_key: str = Header(..., min_length=1, max_length=200), p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)) -> dict:
     if not any(role in p.roles for role in ("staff", "doctor", "admin")):
         raise HTTPException(403, "Role denied")
-    old = await db.scalar(select(IdempotencyKey).where(IdempotencyKey.tenant_id == q.tenant_id, IdempotencyKey.key == idempotency_key))
-    if old: return old.result
-    token = await db.scalar(select(QueueToken).where(QueueToken.queue_id == q.id, QueueToken.status == "WAITING").order_by(QueueToken.created_at).with_for_update())
-    if not token: raise HTTPException(409, "No waiting token")
+    await lock_branch(p, db)
+    q = await scoped_queue(queue_id, p, db)
+    await db.scalar(select(Queue).where(Queue.id == q.id).with_for_update())
+    key, fingerprint = command_key(p, f"call-next:{q.id}", idempotency_key, {})
+    previous = await replay(db, q.tenant_id, key, fingerprint)
+    if previous is not None:
+        return previous
+    token = await db.scalar(select(QueueToken).where(QueueToken.queue_id == q.id, QueueToken.status == "WAITING",
+        QueueToken.business_date == business_date(q)).order_by(QueueToken.created_at, QueueToken.token_number).limit(1).with_for_update())
+    if not token:
+        raise HTTPException(409, "No waiting token")
     token.status, token.version = "CALLED", token.version + 1
-    result = {"id": str(token.id), "status": token.status, "version": token.version}
-    db.add(IdempotencyKey(tenant_id=q.tenant_id, key=idempotency_key, result=result)); await save_event(db, token, p, "CALLED"); await db.commit(); return result
+    result = token_result(token)
+    remember(db, q.tenant_id, key, fingerprint, result)
+    await save_event(db, token, p, "CALLED")
+    await db.commit()
+    return result
 
 @app.post(
     "/v1/tokens/{token_id}/{action}",
@@ -287,26 +249,69 @@ async def call_next(queue_id: uuid.UUID, idempotency_key: str = Header(...), p: 
     response_model=TokenResponse,
     responses={401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
     summary="Apply a token state transition",
-    description="Supported actions are `recall`, `skip`, and `complete`. State changes are audited and published to the outbox.",
+    description="Supported actions are `recall`, `skip`, `start`, `complete`, and `cancel`. State changes are audited and published to the outbox.",
 )
-async def transition(token_id: uuid.UUID, action: Literal["recall", "skip", "complete"], body: Transition = Transition(), idempotency_key: str | None = Header(None), p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)) -> dict:
-    """Apply an authorized queue state transition and publish its audit event."""
-    token = await db.get(QueueToken, token_id)
-    if not token: raise HTTPException(404, "Token not found")
-    require_scope(p, str(token.tenant_id), str(token.branch_id))
+async def transition(token_id: uuid.UUID, action: Literal["recall", "skip", "start", "complete", "cancel"], body: Transition = Transition(), idempotency_key: str | None = Header(None, min_length=1, max_length=200), p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)) -> dict:
     if not any(role in p.roles for role in ("staff", "doctor", "admin")):
         raise HTTPException(403, "Role denied")
+    await lock_branch(p, db)
+    token = await db.scalar(select(QueueToken).where(QueueToken.id == token_id).with_for_update())
+    if not token:
+        raise HTTPException(404, "Token not found")
+    require_scope(p, str(token.tenant_id), str(token.branch_id))
     if idempotency_key:
-        old = await db.scalar(select(IdempotencyKey).where(IdempotencyKey.tenant_id == token.tenant_id, IdempotencyKey.key == idempotency_key))
-        if old:
-            return old.result
-    allowed = {"recall": ("CALLED", "RECALLED"), "skip": ("WAITING", "NO_SHOW"), "complete": ("IN_SERVICE", "COMPLETED")}
-    allowed["complete"] = ("CALLED", "COMPLETED")
-    if action not in allowed or token.status != allowed[action][0] or (body.expected_version is not None and body.expected_version != token.version):
-        raise HTTPException(409, "Invalid state transition")
-    token.status, token.version = allowed[action][1], token.version + 1
-    result = {"id": str(token.id), "status": token.status, "version": token.version}
+        key, fingerprint = command_key(p, f"{action}:{token_id}", idempotency_key, body.model_dump())
+        previous = await replay(db, token.tenant_id, key, fingerprint)
+        if previous is not None:
+            return previous
+    allowed = {
+        "recall": ({"CALLED", "RECALLED", "NO_SHOW"}, "RECALLED"),
+        "skip": ({"WAITING", "CALLED", "RECALLED"}, "NO_SHOW"),
+        "start": ({"CALLED", "RECALLED"}, "IN_SERVICE"),
+        "complete": ({"CALLED", "RECALLED", "IN_SERVICE"}, "COMPLETED"),
+        "cancel": ({"WAITING", "CALLED", "RECALLED", "NO_SHOW"}, "CANCELLED"),
+    }
+    source, target = allowed[action]
+    if token.status not in source or (body.expected_version is not None and body.expected_version != token.version):
+        raise HTTPException(409, "Invalid state transition or stale version")
+    token.status, token.version = target, token.version + 1
+    result = token_result(token)
     if idempotency_key:
-        db.add(IdempotencyKey(tenant_id=token.tenant_id, key=idempotency_key, result=result))
-    await save_event(db, token, p, action); await db.commit()
+        remember(db, token.tenant_id, key, fingerprint, result)
+    await save_event(db, token, p, action)
+    await db.commit()
     return result
+
+
+def token_result(token):
+    return {"id": str(token.id), "label": f"{token.token_number:03d}", "status": token.status, "version": token.version}
+
+
+def command_key(p, operation, key, payload):
+    scoped_key = hashlib.sha256(f"{p.subject}:{p.branch_id}:{operation}:{key}".encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    return scoped_key, fingerprint
+
+
+async def replay(db, tenant_id, key, fingerprint):
+    previous = await db.scalar(select(IdempotencyKey).where(IdempotencyKey.tenant_id == tenant_id, IdempotencyKey.key == key))
+    if previous is None:
+        return None
+    if previous.result.get("fingerprint") != fingerprint:
+        raise HTTPException(409, "Idempotency-Key was already used with a different request")
+    return previous.result["response"]
+
+
+def remember(db, tenant_id, key, fingerprint, result):
+    db.add(IdempotencyKey(tenant_id=tenant_id, key=key, result={"fingerprint": fingerprint, "response": result}))
+
+
+@app.exception_handler(IntegrityError)
+async def constraint_conflict(request, exc):
+    return JSONResponse(status_code=409, content={"detail": "Record conflicts with existing data or dependent records"})
+
+
+app.include_router(identity_router)
+app.include_router(entities_router)
+app.include_router(portal_router)
+app.mount("/assets", StaticFiles(directory=Path(__file__).parent / "static"), name="assets")
