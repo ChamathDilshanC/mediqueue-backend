@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mediqueue-backend"
+version = "0.1.0"
+description = "MediQueue FastAPI backend and outbox worker"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic-settings>=2.5",
+  "sqlalchemy[asyncio]>=2.0",
+  "aiosqlite>=0.20",
+  "asyncpg>=0.29",
+  "psycopg[binary]>=3.2",
+  "alembic>=1.13",
+  "python-jose[cryptography]>=3.3",
+  "httpx>=0.27",
+  "jsonschema>=4.23",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["backend*", "configuration*", "worker*"]

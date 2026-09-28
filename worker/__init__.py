@@ -1,0 +1,1 @@
+"""MediQueue outbox worker package."""
