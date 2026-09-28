@@ -36,4 +36,4 @@ entrypoint = "backend.main:app"
 include = ["backend*", "configuration*", "worker*"]
 
 [tool.setuptools.package-data]
-backend = ["static/*.html", "static/*.css", "static/*.js", "static/*.svg"]
+backend = ["static/*.html", "static/*.css", "static/*.js", "static/*.svg", "static/*.png"]

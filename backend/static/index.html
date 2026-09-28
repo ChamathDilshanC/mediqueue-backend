@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#84cc16">
   <title>MediQueue · API documentation</title>
-  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/brand-logo.png" type="image/png">
   <link rel="stylesheet" href="/assets/docs.css">
   <script src="/assets/docs.js" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
   <header class="header">
-    <a class="brand" href="/docs"><span class="brand-icon" aria-hidden="true">✳</span> MediQueue <span class="brand-label">developers</span></a>
+    <a class="brand" href="/docs"><img class="brand-logo" src="/assets/brand-logo.png" alt="MediQueue"> <span>MediQueue</span> <span class="brand-label">developers</span></a>
     <div class="header-actions"><span class="version" id="version">v1.1.0</span><a href="/openapi.json">OpenAPI <span aria-hidden="true">↗</span></a><a class="button small" href="/swagger">API playground <span aria-hidden="true">↗</span></a></div>
     <button id="menu" class="menu" aria-label="Toggle navigation" aria-expanded="false">☰</button>
   </header>
@@ -22,7 +22,7 @@
     <nav aria-label="Introduction"><a class="nav-link active" href="#overview">Overview <span>↗</span></a><a class="nav-link" href="#quickstart">Quick start</a><a class="nav-link" href="#authentication">Authentication</a></nav>
     <div class="nav-label resource-heading">API REFERENCE <span id="endpoint-count"></span></div>
     <nav id="resource-nav" aria-label="API resources"><span class="muted">Loading API reference…</span></nav>
-    <div class="sidebar-footer"><span class="mini-logo">✳</span><div>Built for better patient flow.<br><span>One API. Every touchpoint.</span></div></div>
+    <div class="sidebar-footer"><img class="mini-logo" src="/assets/brand-logo.png" alt=""><div>Built for better patient flow.<br><span>One API. Every touchpoint.</span></div></div>
   </aside>
   <main id="main">
     <article>
@@ -49,7 +49,7 @@ X-Branch-ID: &lt;branch_id&gt;</code></pre></div>
         <div class="permission-grid"><div><strong>Admin</strong><p>Hospital setup, team memberships, scheduling, and audit history.</p></div><div><strong>Reception</strong><p>Patient registration, appointments, visits, and queue check-in.</p></div><div><strong>Doctor / staff</strong><p>Scoped queue views and authorized token transitions.</p></div></div>
       </section>
       <section class="section" id="reference"><div class="eyebrow">API REFERENCE</div><h2>Every endpoint. One place.</h2><p class="muted">Browse the live API contract. Expand an endpoint for its inputs, response codes, and an example request.</p><div class="filter-bar"><span id="results-count" aria-live="polite">Loading endpoints…</span><a href="/openapi.json" download="mediqueue-openapi.json">Download OpenAPI ↓</a></div><div id="endpoints"></div><p class="empty hidden" id="empty">No endpoints match your search. Try a resource name or HTTP method.</p><p class="error hidden" id="load-error" role="alert">The API reference could not be loaded. <button id="retry">Try again</button></p></section>
-      <footer><a class="brand" href="#overview"><span class="mini-logo">✳</span> MediQueue</a><span>API documentation · ChamathDilshanC</span><a href="/health/ready">Check API readiness ↗</a></footer>
+      <footer><a class="brand" href="#overview"><img class="mini-logo" src="/assets/brand-logo.png" alt=""> <span>MediQueue</span></a><span>API documentation · ChamathDilshanC</span><a href="/health/ready">Check API readiness ↗</a></footer>
     </article>
     <aside class="toc"><div class="eyebrow">≡ &nbsp; ON THIS PAGE</div><nav aria-label="On this page"><a href="#overview" class="current">Overview</a><a href="#quickstart">Quick start</a><a href="#authentication">Authentication</a><a href="#reference">API reference</a></nav><div class="help-box"><span class="feature-icon">{ }</span><strong>Ready to try it?</strong><p>Send requests with the interactive API playground.</p><a href="/swagger">Open playground ↗</a></div></aside>
   </main>

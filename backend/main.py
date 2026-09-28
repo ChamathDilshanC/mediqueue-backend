@@ -46,6 +46,20 @@ app = FastAPI(
     ],
 )
 
+
+_openapi = app.openapi
+
+
+def branded_openapi() -> dict[str, Any]:
+    """Add the deployed brand asset to the OpenAPI metadata."""
+    schema = _openapi()
+    schema["info"]["x-logo"] = {"url": "/assets/brand-logo.png", "altText": "MediQueue"}
+    return schema
+
+
+app.openapi = branded_openapi
+
+
 class CheckIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     patient_ref: str = Field(..., min_length=1, max_length=200, description="Non-clinical patient reference.")
