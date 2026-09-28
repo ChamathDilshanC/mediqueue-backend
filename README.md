@@ -1,18 +1,45 @@
 # MediQueue Backend
 
-FastAPI service deployed on Vercel with the explicit entrypoint
-`backend.main:app`.
+> The typed, tenant-scoped FastAPI service behind MediQueue.
 
-## Endpoints
+[![FastAPI](https://img.shields.io/badge/FastAPI-API-05998b?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Tests](https://img.shields.io/badge/tests-17%20passed%20%2F%202%20skipped-2ea44f)](https://github.com/ChamathDilshanC/mediqueue-backend)
+[![Deploy](https://img.shields.io/badge/live-Vercel-black?logo=vercel&logoColor=white)](https://mediqueue-backend-eta.vercel.app/docs)
 
-- `/` and `/docs` - responsive white/lime API reference with live endpoint search, request/response examples and copy controls
-- `/swagger` - interactive Swagger UI with bearer authorization
-- `/redoc` - ReDoc
-- `/openapi.json` - generated OpenAPI contract
-- `/health` - liveness
-- `/health/ready` - database readiness
+The backend owns identity integration, hospital and branch management,
+memberships, scheduling, patients, appointments, visits, queues, audit events,
+outbox events, and the public configuration endpoint.
 
-## Run locally
+## API surface
+
+| Area | Capabilities |
+| --- | --- |
+| Identity | Register, login, refresh, logout, recovery, current profile |
+| Hospitals | Onboarding, branches, departments, rooms, doctors |
+| Access | Memberships, roles, tenant scope, branch scope |
+| Scheduling | Timezone-aware schedules, capacity, overlap prevention |
+| Patient flow | Patients, appointments, visits, queue setup |
+| Queue | Check-in, snapshot, call-next, token transitions |
+| Reliability | Idempotency, row locks, audit trail, PostgreSQL outbox |
+| Operations | `/health`, `/health/ready`, `/status`, `/v1/config/public` |
+
+## Request flow
+
+```mermaid
+flowchart TD
+    R[HTTP request] --> JWT[Verify Supabase JWT]
+    JWT --> M[Resolve active membership]
+    M --> S{Tenant + branch scope}
+    S -->|denied| E[401 / 403]
+    S -->|allowed| T[Open database transaction]
+    T --> C[Lock branch or queue row]
+    C --> D[Apply domain command]
+    D --> O[Audit + outbox + idempotency]
+    O --> COMMIT[Commit]
+    COMMIT --> RES[Typed response]
+```
+
+## Local setup
 
 ```powershell
 python -m pip install -e '.[test]'
@@ -21,74 +48,63 @@ python -m backend.init_db
 python -m uvicorn backend.main:app --reload
 ```
 
-The initializer is for SQLite only; PostgreSQL deployments must run `python -m alembic upgrade head`. SQLite uses a main database plus persistent `.iam.db`, `.queue.db`, `.scheduling.db` and `.notifications.db` sidecars. SQLite is for development and does not provide PostgreSQL row-lock concurrency guarantees.
+The SQLite initializer is for development only. Production uses PostgreSQL
+with Alembic:
 
-### Vercel database connection
-
-For Vercel, set `DATABASE_URL` to the Supabase **Session Pooler** URL from
-Supabase **Project Settings → Database → Connect**. Use port `5432` and the
-`postgres.<project-ref>` username, for example:
-
-```text
-postgresql://postgres.<project-ref>:PASSWORD@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+```powershell
+python -m alembic upgrade head
 ```
 
-Do not use `db.<project-ref>.supabase.co:5432` on Vercel: Supabase direct
-database hosts are IPv6-only on projects without the IPv4 add-on, while Vercel
-functions may not have outbound IPv6 connectivity. URL-encode special password
-characters (`@` as `%40`, `#` as `%23`, and `%` as `%25`), set the variable for
-the Production environment, and redeploy. Run `/health/ready` after deployment
-to verify the database connection.
+## Environment
 
-## Authentication and hospital onboarding
+Required production settings include:
 
-Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and either `SUPABASE_JWT_SECRET` (HS256) or `SUPABASE_JWKS_URL` (RS256/ES256). Asymmetric projects can use the default JWKS URL derived from the Supabase URL. No service-role key is needed. Configure confirmation/recovery redirect URLs and email delivery in Supabase. Authentication endpoints return 503 if the provider is not configured; they never create fake sessions.
+```text
+DATABASE_URL=postgresql://postgres.<project-ref>:PASSWORD@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=<public-anon-key>
+SUPABASE_JWKS_URL=https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json
+CONFIG_PATH=configuration/defaults.json
+```
 
-1. `POST /v1/auth/register` with email, password and display_name. Confirm the email when `confirmation_required` is true.
-2. `POST /v1/auth/login` to get the access/refresh tokens. Use `Authorization: Bearer <access_token>`.
-3. `GET /v1/auth/me` loads/creates the local user profile. `PATCH /v1/users/me` updates its display name.
-4. `POST /v1/hospitals` with name, branch_name and timezone creates the hospital, first branch, and caller's admin membership in one database transaction. Hospital registration requires an authenticated identity, not an existing staff membership.
-5. Send `X-Tenant-ID` (hospital ID) and `X-Branch-ID` for scoped operations. One active membership is selected automatically; multiple memberships require explicit selection.
-6. Other staff register their own accounts and call `/auth/me`. A branch admin assigns their returned user UUID through `POST /v1/memberships`. Public registration cannot assign staff roles. Revoked memberships stop working on the next scoped request; the final branch admin cannot be removed.
+Use the Supabase Session Pooler on port `5432` for Vercel. Encode password
+characters (`@` → `%40`, `#` → `%23`, `%` → `%25`). Never commit `.env`,
+database passwords, service-role keys, or OAuth secrets.
 
-JWT signatures, algorithm allowlists, issuer, audience, expiry and subject are verified. Authorization uses database memberships, **not user metadata or role claims**. Existing installations that relied only on JWT tenant/role claims must provision memberships before enabling this version.
+## Documentation and deployment
 
-`POST /v1/auth/refresh` rotates sessions. `/v1/auth/logout` revokes refresh tokens; already issued JWTs remain valid until expiry. `/v1/auth/forgot-password` and `PUT /v1/auth/password` support Supabase recovery sessions. Auth responses carrying tokens are marked `Cache-Control: no-store`. Keep tokens out of logs and URLs. Supabase supplies auth rate limits; configure the deployment edge for additional abuse limits.
+- Local portal: <http://127.0.0.1:8000/docs>
+- Live portal: <https://mediqueue-backend-eta.vercel.app/docs>
+- Swagger: `/swagger`
+- ReDoc: `/redoc`
+- OpenAPI: `/openapi.json`
 
-## API coverage
+Vercel deploys `backend.main:app`. Set Production environment variables in the
+`mediqueue-backend` Vercel project, then create a new deployment after every
+environment change. Verify:
 
-All paths below have `/v1` prefix. The live OpenAPI contract is the complete field-level reference (67 method/path operations).
+```powershell
+Invoke-RestMethod https://mediqueue-backend-eta.vercel.app/health
+Invoke-RestMethod https://mediqueue-backend-eta.vercel.app/health/ready
+```
 
-| Resource | Operations |
-| --- | --- |
-| Authentication | register, login, refresh, logout, forgot-password, change password |
-| Users | current profile/memberships, edit current profile, admin branch-user list |
-| Hospitals | register with first branch, list accessible hospitals, detail, rename |
-| Branches | create, list accessible branches, detail, update |
-| Memberships | admin list, add registered user, update role or revoke/reactivate |
-| Departments, rooms, doctors, schedules | scoped list, detail, create, full editable-field update (PUT), delete unused records |
-| Patients | hospital-scoped reference registration, list, detail, update, delete unused records |
-| Queues | branch-scoped setup CRUD, today's snapshot, check-in, call-next |
-| Tokens | scoped state detail; recall, skip, start, complete, cancel |
-| Visits | create and immutable history list/detail |
-| Appointments | book, list, detail, status transition/cancellation |
-| Audit | admin-only immutable branch history |
-
-Hospital/branch/account erasure is intentionally not a generic DELETE operation: it would remove identity and care-flow history. Revoke staff through membership `active=false`; cancel appointments/tokens via their status transitions. Audit/outbox/idempotency records are internal infrastructure, not writable CRUD resources. Patients store non-clinical references only and are shared across branches of the same hospital. Public endpoints do not expose patient data. The frontend submodule remains a placeholder; this change styles the API documentation only.
-
-Schedules enforce timezone-aware ranges, positive capacity, and doctor/room overlap prevention. Schedules with appointment history cannot be rewritten. Appointment state transitions are `BOOKED → CHECKED_IN → COMPLETED`, or `BOOKED → CANCELLED / NO_SHOW`; cancellation frees capacity. Mutations lock the branch/schedule in PostgreSQL to prevent overbooking.
-
-Queue check-in and call-next require a unique `Idempotency-Key`; token transitions accept one. Keys are bound to actor, branch and operation, and request-body changes on a repeated key return 409. Replaying a successful request returns its saved response. Legacy records from the old unscoped-key format are not replayed across this upgrade; drain in-flight retries during rollout. Queue commands create audit and outbox records transactionally. Call-next uses today's branch business date. `start` enables `IN_SERVICE`; completion also accepts CALLED/RECALLED for compatibility.
-
-## Verification
+## Testing
 
 ```powershell
 python -m pytest -q
-# Optional real PostgreSQL tests, using a dedicated test database:
-$env:MEDIQUEUE_TEST_DATABASE_URL = 'postgresql+asyncpg://test_user:password@localhost/mediqueue_test'
-python -m pytest -q
 ```
 
-PostgreSQL tests create isolated, randomly named schemas and remove those test schemas afterward. They exercise simultaneous check-ins, idempotent retries, call-next locking and appointment capacity. Migrations must also be exercised against a disposable PostgreSQL database before deployment. Do not point test settings at a production database.
+The suite covers API behavior, state transitions, tenant isolation, idempotent
+commands, and database-backed concurrency paths where PostgreSQL is configured.
 
-Provider contract: [Supabase Auth REST API](https://supabase.github.io/auth/).
+## Repository boundaries
+
+- `backend/` — application package
+- `alembic/` — owned schema migrations
+- `tests/` — unit and integration tests
+- `worker/` — outbox processing entry points
+- `backend/static/` — branded documentation portal assets
+
+See the [main repository](https://github.com/ChamathDilshanC/mediqueue) for the
+system diagram and [architecture notes](../docs/architecture.md) for ownership
+and rollout decisions.
