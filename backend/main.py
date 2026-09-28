@@ -1,5 +1,6 @@
 """FastAPI application entry point for the MediQueue backend."""
 import json
+import logging
 import uuid
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -14,6 +15,8 @@ from .auth import Principal, current_principal, require_scope
 from .db import get_session
 from .models import Queue, QueueToken, Visit, Patient, AuditEvent, OutboxEvent, IdempotencyKey
 from .settings import get_settings
+
+logger = logging.getLogger("mediqueue.api")
 
 app = FastAPI(
     title="MediQueue API",
@@ -175,8 +178,9 @@ async def readiness(db: AsyncSession = Depends(get_session)) -> ReadinessRespons
     """Verify that the API can reach its configured PostgreSQL database."""
     try:
         await db.execute(text("SELECT 1"))
-    except SQLAlchemyError as exc:
+    except (SQLAlchemyError, OSError, RuntimeError, ValueError) as exc:
         await db.rollback()
+        logger.exception("Database readiness check failed")
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Database unavailable") from exc
     return ReadinessResponse()
 

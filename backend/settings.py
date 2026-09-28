@@ -2,6 +2,7 @@
 from functools import lru_cache
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables and .env."""
@@ -20,11 +21,13 @@ class Settings(BaseSettings):
     @classmethod
     def use_async_postgres_driver(cls, value: str) -> str:
         """Ensure PostgreSQL URLs use the async driver required by SQLAlchemy."""
-        if value.startswith("postgresql://"):
-            return value.replace("postgresql://", "postgresql+asyncpg://", 1)
-        if value.startswith("postgresql+psycopg://"):
-            return value.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
-        return value
+        if not value.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+asyncpg://")):
+            return value
+        url = make_url(value)
+        url = url.set(drivername="postgresql+asyncpg")
+        if "sslmode" in url.query and "ssl" not in url.query:
+            url = url.update_query_dict({"ssl": url.query["sslmode"]}).difference_update_query(["sslmode"])
+        return url.render_as_string(hide_password=False)
 
 @lru_cache
 def get_settings() -> Settings:
