@@ -1,0 +1,1 @@
+{"schemaVersion":1,"configVersion":"development","queue":{"recallLimit":2,"noShowGraceSeconds":120,"maxPriorityStreak":3},"display":{"languages":["en"]},"publicAllowlist":["schemaVersion","configVersion","display","public"]}

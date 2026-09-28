@@ -28,5 +28,8 @@ test = ["pytest>=8", "pytest-asyncio>=0.24"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[tool.vercel]
+entrypoint = "backend.main:app"
+
 [tool.setuptools.packages.find]
 include = ["backend*", "configuration*", "worker*"]

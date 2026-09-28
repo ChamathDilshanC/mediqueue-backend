@@ -1,0 +1,1 @@
+{"schemaVersion":1,"configVersion":"2026-09-28.1","queue":{"recallLimit":2,"noShowGraceSeconds":120,"maxPriorityStreak":3},"display":{"languages":["si","en","ta"]},"public":{"apiVersion":"v1","features":{"queueDisplay":true}},"publicAllowlist":["schemaVersion","configVersion","display","public"]}

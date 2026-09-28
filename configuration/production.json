@@ -1,0 +1,1 @@
+{"schemaVersion":1,"configVersion":"production","queue":{"recallLimit":2,"noShowGraceSeconds":120,"maxPriorityStreak":3},"display":{"languages":["si","en","ta"]},"publicAllowlist":["schemaVersion","configVersion","display","public"]}
