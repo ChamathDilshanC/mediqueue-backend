@@ -23,6 +23,23 @@ python -m uvicorn backend.main:app --reload
 
 The initializer is for SQLite only; PostgreSQL deployments must run `python -m alembic upgrade head`. SQLite uses a main database plus persistent `.iam.db`, `.queue.db`, `.scheduling.db` and `.notifications.db` sidecars. SQLite is for development and does not provide PostgreSQL row-lock concurrency guarantees.
 
+### Vercel database connection
+
+For Vercel, set `DATABASE_URL` to the Supabase **Session Pooler** URL from
+Supabase **Project Settings → Database → Connect**. Use port `5432` and the
+`postgres.<project-ref>` username, for example:
+
+```text
+postgresql://postgres.<project-ref>:PASSWORD@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+```
+
+Do not use `db.<project-ref>.supabase.co:5432` on Vercel: Supabase direct
+database hosts are IPv6-only on projects without the IPv4 add-on, while Vercel
+functions may not have outbound IPv6 connectivity. URL-encode special password
+characters (`@` as `%40`, `#` as `%23`, and `%` as `%25`), set the variable for
+the Production environment, and redeploy. Run `/health/ready` after deployment
+to verify the database connection.
+
 ## Authentication and hospital onboarding
 
 Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and either `SUPABASE_JWT_SECRET` (HS256) or `SUPABASE_JWKS_URL` (RS256/ES256). Asymmetric projects can use the default JWKS URL derived from the Supabase URL. No service-role key is needed. Configure confirmation/recovery redirect URLs and email delivery in Supabase. Authentication endpoints return 503 if the provider is not configured; they never create fake sessions.

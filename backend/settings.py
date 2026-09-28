@@ -27,6 +27,8 @@ class Settings(BaseSettings):
         url = url.set(drivername="postgresql+asyncpg")
         if "sslmode" in url.query and "ssl" not in url.query:
             url = url.update_query_dict({"ssl": url.query["sslmode"]}).difference_update_query(["sslmode"])
+        if "ssl" not in url.query:
+            url = url.update_query_dict({"ssl": "require"})
         return url.render_as_string(hide_password=False)
 
 @lru_cache
