@@ -5,6 +5,7 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Literal
 from fastapi import Depends, FastAPI, HTTPException, Header, status
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -74,19 +75,67 @@ class ServiceInfoResponse(BaseModel):
     documentation: str
     health: str
 
-@app.get(
-    "/",
-    tags=["Health"],
-    response_model=ServiceInfoResponse,
-    summary="Show API service information",
-)
-async def service_info() -> ServiceInfoResponse:
-    """Return the API identity and links to its operational endpoints."""
-    return ServiceInfoResponse(
-        name="MediQueue API",
-        version=app.version,
-        documentation="/docs",
-        health="/health",
+@app.get("/", tags=["Health"], response_class=HTMLResponse, include_in_schema=False)
+async def service_info() -> HTMLResponse:
+    """Render a browser-friendly API index with links to every public endpoint."""
+    return HTMLResponse(
+        content=f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MediQueue API</title>
+  <style>
+    :root {{ color-scheme: light; font-family: Inter, system-ui, sans-serif; }}
+    body {{ margin: 0; background: #f4f7fb; color: #172033; }}
+    main {{ max-width: 960px; margin: 48px auto; padding: 0 24px; }}
+    .hero, section {{ background: white; border: 1px solid #dce4ef; border-radius: 14px; padding: 28px; margin-bottom: 18px; box-shadow: 0 5px 20px #1720330d; }}
+    h1 {{ margin: 0 0 8px; color: #1261a0; }} h2 {{ margin-top: 0; }}
+    p {{ line-height: 1.6; }} a {{ color: #1261a0; font-weight: 600; text-decoration: none; }}
+    a:hover {{ text-decoration: underline; }}
+    .links {{ display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }}
+    .links a {{ background: #1261a0; color: white; padding: 10px 14px; border-radius: 8px; }}
+    table {{ width: 100%; border-collapse: collapse; }} th, td {{ text-align: left; padding: 11px 8px; border-bottom: 1px solid #e7edf5; }}
+    code {{ background: #eef3f8; border-radius: 4px; padding: 2px 5px; }}
+    .ok {{ color: #16804b; font-weight: 700; }}
+  </style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <h1>MediQueue API</h1>
+    <p>Tenant-scoped healthcare queue and patient-flow backend.</p>
+    <p class="ok">Service version {app.version} · API online</p>
+    <div class="links">
+      <a href="/docs">Swagger UI</a>
+      <a href="/redoc">ReDoc</a>
+      <a href="/openapi.json">OpenAPI JSON</a>
+      <a href="/health">Liveness</a>
+      <a href="/health/ready">Database readiness</a>
+    </div>
+  </div>
+  <section>
+    <h2>Operational endpoints</h2>
+    <table>
+      <tr><th>Endpoint</th><th>Purpose</th></tr>
+      <tr><td><a href="/health"><code>GET /health</code></a></td><td>API liveness check.</td></tr>
+      <tr><td><a href="/health/ready"><code>GET /health/ready</code></a></td><td>Verifies the configured PostgreSQL connection with <code>SELECT 1</code>.</td></tr>
+      <tr><td><a href="/v1/config/public"><code>GET /v1/config/public</code></a></td><td>Returns allowlisted browser-safe configuration.</td></tr>
+    </table>
+  </section>
+  <section>
+    <h2>Authenticated API groups</h2>
+    <p>Queue and token operations require a Supabase JWT, tenant/branch scope, and the role documented in Swagger.</p>
+    <table>
+      <tr><th>Group</th><th>Routes</th></tr>
+      <tr><td>Queues</td><td><code>GET /v1/queues/{{queue_id}}/snapshot</code>, <code>POST /v1/queues/{{queue_id}}/tokens</code>, <code>POST /v1/queues/{{queue_id}}/call-next</code></td></tr>
+      <tr><td>Tokens</td><td><code>POST /v1/tokens/{{token_id}}/{{action}}</code> where action is <code>recall</code>, <code>skip</code>, or <code>complete</code></td></tr>
+    </table>
+  </section>
+  <section><h2>Authentication and safety</h2><p>Use the <a href="/docs">interactive API documentation</a> for request schemas, response examples, authorization requirements, idempotency headers, and error responses. Patient-identifying data is not exposed by public display endpoints.</p></section>
+</main>
+</body>
+</html>"""
     )
 
 @app.get("/health", tags=["Health"], response_model=HealthResponse, summary="Check API liveness")
