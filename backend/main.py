@@ -67,6 +67,28 @@ class PublicConfigResponse(BaseModel):
     display: dict[str, Any] | None = None
     public: dict[str, Any] | None = None
 
+class ServiceInfoResponse(BaseModel):
+    name: str
+    version: str
+    status: Literal["ok"] = "ok"
+    documentation: str
+    health: str
+
+@app.get(
+    "/",
+    tags=["Health"],
+    response_model=ServiceInfoResponse,
+    summary="Show API service information",
+)
+async def service_info() -> ServiceInfoResponse:
+    """Return the API identity and links to its operational endpoints."""
+    return ServiceInfoResponse(
+        name="MediQueue API",
+        version=app.version,
+        documentation="/docs",
+        health="/health",
+    )
+
 @app.get("/health", tags=["Health"], response_model=HealthResponse, summary="Check API liveness")
 async def health() -> HealthResponse:
     """Return liveness status without requiring authentication."""
