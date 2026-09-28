@@ -75,6 +75,12 @@ class ServiceInfoResponse(BaseModel):
     documentation: str
     health: str
 
+class StatusResponse(BaseModel):
+    service: str
+    version: str
+    status: Literal["operational"] = "operational"
+    database: str = "available"
+
 @app.get("/", tags=["Health"], response_class=HTMLResponse, include_in_schema=False)
 async def service_info() -> HTMLResponse:
     """Render a browser-friendly API index with links to every public endpoint."""
@@ -88,55 +94,70 @@ async def service_info() -> HTMLResponse:
   <style>
     :root {{ color-scheme: light; font-family: Inter, system-ui, sans-serif; }}
     body {{ margin: 0; background: #f4f7fb; color: #172033; }}
-    main {{ max-width: 960px; margin: 48px auto; padding: 0 24px; }}
-    .hero, section {{ background: white; border: 1px solid #dce4ef; border-radius: 14px; padding: 28px; margin-bottom: 18px; box-shadow: 0 5px 20px #1720330d; }}
-    h1 {{ margin: 0 0 8px; color: #1261a0; }} h2 {{ margin-top: 0; }}
+    main {{ max-width: 1080px; margin: 36px auto; padding: 0 24px; }}
+    .hero, section {{ background: white; border: 1px solid #dce4ef; border-radius: 14px; padding: 26px; margin-bottom: 18px; box-shadow: 0 5px 20px #1720330d; }}
+    .hero {{ display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }}
+    h1 {{ margin: 0 0 8px; color: #1261a0; }} h2 {{ margin: 0 0 16px; }}
     p {{ line-height: 1.6; }} a {{ color: #1261a0; font-weight: 600; text-decoration: none; }}
     a:hover {{ text-decoration: underline; }}
-    .links {{ display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }}
+    .links {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }}
     .links a {{ background: #1261a0; color: white; padding: 10px 14px; border-radius: 8px; }}
-    table {{ width: 100%; border-collapse: collapse; }} th, td {{ text-align: left; padding: 11px 8px; border-bottom: 1px solid #e7edf5; }}
+    .status {{ background: #ecfdf3; border: 1px solid #a7e3bf; border-radius: 12px; padding: 16px 20px; min-width: 150px; }}
+    .status strong {{ display: block; color: #16804b; font-size: 18px; }} .status span {{ color: #456; font-size: 13px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }}
+    .card {{ border: 1px solid #e0e7f0; border-radius: 10px; padding: 16px; }}
+    .card h3 {{ margin: 0 0 8px; font-size: 15px; }} .card p {{ margin: 8px 0; font-size: 14px; color: #526176; }}
+    .method {{ display: inline-block; border-radius: 5px; padding: 3px 7px; margin-right: 7px; color: white; background: #16804b; font-size: 11px; font-weight: 700; }}
+    .post {{ background: #1261a0; }} .auth {{ color: #7a4b00; background: #fff3cd; border-radius: 5px; padding: 3px 7px; font-size: 11px; }}
     code {{ background: #eef3f8; border-radius: 4px; padding: 2px 5px; }}
     .ok {{ color: #16804b; font-weight: 700; }}
+    @media (max-width: 680px) {{ .hero {{ display: block; }} .status {{ margin-top: 20px; }} }}
   </style>
 </head>
 <body>
 <main>
   <div class="hero">
-    <h1>MediQueue API</h1>
+    <div><h1>MediQueue API</h1>
     <p>Tenant-scoped healthcare queue and patient-flow backend.</p>
-    <p class="ok">Service version {app.version} · API online</p>
+    <p class="ok">Version {app.version} · Live API</p>
     <div class="links">
       <a href="/docs">Swagger UI</a>
       <a href="/redoc">ReDoc</a>
       <a href="/openapi.json">OpenAPI JSON</a>
       <a href="/health">Liveness</a>
       <a href="/health/ready">Database readiness</a>
-    </div>
+      <a href="/status">Service status</a>
+    </div></div>
+    <div class="status"><strong>● Operational</strong><span>API is live</span><br><span>Supabase PostgreSQL</span></div>
   </div>
   <section>
-    <h2>Operational endpoints</h2>
-    <table>
-      <tr><th>Endpoint</th><th>Purpose</th></tr>
-      <tr><td><a href="/health"><code>GET /health</code></a></td><td>API liveness check.</td></tr>
-      <tr><td><a href="/health/ready"><code>GET /health/ready</code></a></td><td>Verifies the configured PostgreSQL connection with <code>SELECT 1</code>.</td></tr>
-      <tr><td><a href="/v1/config/public"><code>GET /v1/config/public</code></a></td><td>Returns allowlisted browser-safe configuration.</td></tr>
-    </table>
+    <h2>System endpoints</h2>
+    <div class="grid">
+      <div class="card"><h3><a href="/status"><span class="method">GET</span><code>/status</code></a></h3><p>Service and database availability summary.</p><span class="auth">Public</span></div>
+      <div class="card"><h3><a href="/health"><span class="method">GET</span><code>/health</code></a></h3><p>Fast API liveness check.</p><span class="auth">Public</span></div>
+      <div class="card"><h3><a href="/health/ready"><span class="method">GET</span><code>/health/ready</code></a></h3><p>Runs <code>SELECT 1</code> against PostgreSQL.</p><span class="auth">Public</span></div>
+      <div class="card"><h3><a href="/v1/config/public"><span class="method">GET</span><code>/v1/config/public</code></a></h3><p>Allowlisted browser-safe configuration.</p><span class="auth">Public</span></div>
+    </div>
   </section>
   <section>
-    <h2>Authenticated API groups</h2>
-    <p>Queue and token operations require a Supabase JWT, tenant/branch scope, and the role documented in Swagger.</p>
-    <table>
-      <tr><th>Group</th><th>Routes</th></tr>
-      <tr><td>Queues</td><td><code>GET /v1/queues/{{queue_id}}/snapshot</code>, <code>POST /v1/queues/{{queue_id}}/tokens</code>, <code>POST /v1/queues/{{queue_id}}/call-next</code></td></tr>
-      <tr><td>Tokens</td><td><code>POST /v1/tokens/{{token_id}}/{{action}}</code> where action is <code>recall</code>, <code>skip</code>, or <code>complete</code></td></tr>
-    </table>
+    <h2>Application endpoints</h2>
+    <div class="grid">
+      <div class="card"><h3><a href="/docs#/Queues/snapshot_v1_queues__queue_id__snapshot_get"><span class="method">GET</span><code>/v1/queues/{{queue_id}}/snapshot</code></a></h3><p>Current non-identifying queue snapshot.</p><span class="auth">Supabase JWT · Staff</span></div>
+      <div class="card"><h3><a href="/docs#/Queues/check_in_v1_queues__queue_id__tokens_post"><span class="method post">POST</span><code>/v1/queues/{{queue_id}}/tokens</code></a></h3><p>Check in and create a waiting token.</p><span class="auth">JWT · Reception · Idempotency-Key</span></div>
+      <div class="card"><h3><a href="/docs#/Queues/call_next_v1_queues__queue_id__call_next_post"><span class="method post">POST</span><code>/v1/queues/{{queue_id}}/call-next</code></a></h3><p>Call the next waiting token transactionally.</p><span class="auth">JWT · Doctor/Staff · Idempotency-Key</span></div>
+      <div class="card"><h3><a href="/docs#/Tokens/transition_v1_tokens__token_id___action__post"><span class="method post">POST</span><code>/v1/tokens/{{token_id}}/{{action}}</code></a></h3><p>Recall, skip, or complete a token.</p><span class="auth">JWT · Authorized role</span></div>
+    </div>
   </section>
   <section><h2>Authentication and safety</h2><p>Use the <a href="/docs">interactive API documentation</a> for request schemas, response examples, authorization requirements, idempotency headers, and error responses. Patient-identifying data is not exposed by public display endpoints.</p></section>
 </main>
 </body>
 </html>"""
     )
+
+@app.get("/status", tags=["Health"], response_model=StatusResponse, summary="Get service status")
+async def service_status() -> StatusResponse:
+    """Return a lightweight public service status without probing the database."""
+    return StatusResponse(service=app.title, version=app.version)
 
 @app.get("/health", tags=["Health"], response_model=HealthResponse, summary="Check API liveness")
 async def health() -> HealthResponse:
