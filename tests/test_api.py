@@ -165,6 +165,33 @@ async def test_missing_auth_provider_is_explicit_and_profile_metadata_cannot_ass
     assert response.json()["memberships"] == []
 
 
+@pytest.mark.parametrize("endpoint,provider_code", [
+    ("login", "over_request_rate_limit"),
+    ("register", "over_email_send_rate_limit"),
+    ("register", "private_unknown_code"),
+])
+async def test_auth_rate_limits_preserve_status_and_safe_retry_metadata(api, monkeypatch, endpoint, provider_code):
+    client, _ = api
+    real_client = httpx.AsyncClient
+
+    def provider(request):
+        return httpx.Response(429, headers={"Retry-After": "120"},
+                              json={"code": provider_code, "msg": "private provider diagnostic"})
+
+    monkeypatch.setattr(identity.httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(provider), **kwargs))
+    body = {"email": "test@example.com", "password": "test-password"}
+    if endpoint == "register":
+        body["display_name"] = "Test"
+    response = await client.post(f"/v1/auth/{endpoint}", json=body)
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "120"
+    assert "private provider diagnostic" not in response.text
+    if provider_code.startswith("over_"):
+        assert response.headers["x-auth-error-code"] == provider_code
+    else:
+        assert "x-auth-error-code" not in response.headers
+
+
 async def test_hospital_membership_lifecycle_and_scope(api):
     client, _ = api
     owner, headers, data = await onboard(client)

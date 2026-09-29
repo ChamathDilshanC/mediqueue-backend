@@ -38,7 +38,19 @@ async def auth_request(method: str, path: str, payload: dict | None = None, toke
             if path.startswith("token?grant_type=password"):
                 code, message = 401, "Invalid credentials or unconfirmed email"
             if response.status_code == 429:
+                code = 429
                 message = "Too many authentication requests. Try again later."
+                error_headers = {}
+                try:
+                    provider_code = response.json().get("code")
+                except (ValueError, AttributeError):
+                    provider_code = None
+                if provider_code in {"over_email_send_rate_limit", "over_request_rate_limit"}:
+                    error_headers["X-Auth-Error-Code"] = provider_code
+                retry_after = response.headers.get("Retry-After", "")
+                if retry_after.isdigit():
+                    error_headers["Retry-After"] = str(min(86400, max(1, int(retry_after))))
+                raise HTTPException(code, message, headers=error_headers)
             raise HTTPException(code, message)
         return response.json() if response.content else {}
     except (httpx.HTTPError, ValueError) as exc:
