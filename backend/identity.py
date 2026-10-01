@@ -170,6 +170,13 @@ async def apply_for_organization(
     return application
 
 
+@router.get("/hospital-applications/me", tags=["Hospitals"], response_model=list[OrganizationApplicationOutput])
+async def my_hospital_applications(identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
+    """Fetch the caller's organization applications."""
+    profile = await ensure_profile(db, identity)
+    return (await db.scalars(select(OrganizationApplication).where(OrganizationApplication.applicant_id == profile.id).order_by(OrganizationApplication.id.desc()))).all()
+
+
 @router.get("/admin/hospital-applications", tags=["Hospitals"], response_model=list[OrganizationApplicationOutput])
 async def admin_list_applications(identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
     require_system_admin(identity)
