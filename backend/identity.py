@@ -7,13 +7,13 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .auth import Identity, Principal, bearer, current_identity, current_principal, require_role, require_scope
+from .auth import Identity, Principal, bearer, current_identity, current_principal, require_role, require_scope, require_system_admin
 from .db import get_session
 from .models import AuditEvent, Branch, Membership, OrganizationApplication, Queue, Tenant, UserProfile
 from .schemas import (ERROR_RESPONSES, AuthResult, BranchInput, BranchOutput, Credentials, HospitalInput,
     HospitalOutput, HospitalRegister, HospitalRegistration, MeOutput, MembershipInput,
     MembershipOutput, MembershipPatch, OrganizationApplicationInput, OrganizationApplicationOutput,
-    PasswordChange, ProfileInput, ProfileOutput,
+    AdminApplicationPatch, PasswordChange, ProfileInput, ProfileOutput,
     Recover, Refresh, Register)
 from .settings import get_settings
 
@@ -168,6 +168,39 @@ async def apply_for_organization(
     await db.commit()
     await db.refresh(application)
     return application
+
+
+@router.get("/admin/hospital-applications", tags=["Hospitals"], response_model=list[OrganizationApplicationOutput])
+async def admin_list_applications(identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
+    require_system_admin(identity)
+    return (await db.scalars(select(OrganizationApplication).order_by(OrganizationApplication.status.desc(), OrganizationApplication.id))).all()
+
+
+@router.patch("/admin/hospital-applications/{application_id}", tags=["Hospitals"], response_model=OrganizationApplicationOutput)
+async def admin_update_application(application_id: uuid.UUID, body: AdminApplicationPatch, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
+    require_system_admin(identity)
+    app = await db.get(OrganizationApplication, application_id)
+    if not app:
+        raise HTTPException(404, "Application not found")
+    if app.status != "pending_review":
+        raise HTTPException(400, "Application is already processed")
+        
+    app.status = body.status
+    
+    if body.status == "verified":
+        tenant = Tenant(name=app.official_name)
+        db.add(tenant)
+        await db.flush()
+        branch = Branch(tenant_id=tenant.id, name="Main branch", timezone="Asia/Colombo")
+        db.add(branch)
+        await db.flush()
+        membership = Membership(user_id=app.applicant_id, tenant_id=tenant.id, branch_id=branch.id, role="admin")
+        db.add(membership)
+        audit(db, Principal(identity.subject, str(tenant.id), str(branch.id), ("admin",)), "hospital.created_from_application", tenant.id)
+        
+    await db.commit()
+    await db.refresh(app)
+    return app
 
 
 @router.get("/hospitals", tags=["Hospitals"], response_model=list[HospitalOutput])

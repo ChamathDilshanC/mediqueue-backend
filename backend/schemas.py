@@ -129,6 +129,10 @@ class OrganizationApplicationOutput(OrganizationApplicationInput, Output):
     status: Literal["pending_review", "verified", "rejected"]
 
 
+class AdminApplicationPatch(Input):
+    status: Literal["verified", "rejected"]
+
+
 class HospitalOutput(Output):
     id: uuid.UUID
     name: str

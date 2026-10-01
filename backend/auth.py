@@ -20,6 +20,7 @@ bearer = HTTPBearer(auto_error=False)
 class Identity:
     subject: str
     display_name: str = ""
+    email: str = ""
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,8 @@ async def current_identity(credentials: HTTPAuthorizationCredentials | None = De
                             options={"require_exp": True, "require_sub": True, "require_aud": True, "require_iss": True})
         metadata = claims.get("user_metadata") or {}
         name = metadata.get("display_name", "") if isinstance(metadata, dict) else ""
-        return Identity(str(uuid.UUID(claims["sub"])), name[:200] if isinstance(name, str) else "")
+        email = claims.get("email", "")
+        return Identity(str(uuid.UUID(claims["sub"])), name[:200] if isinstance(name, str) else "", email)
     except httpx.HTTPError as exc:
         raise HTTPException(503, "Identity provider unavailable") from exc
     except (JWTError, KeyError, ValueError, TypeError, StopIteration) as exc:
@@ -94,3 +96,8 @@ def require_scope(principal: Principal, tenant_id: str, branch_id: str) -> None:
 def require_role(principal: Principal, *roles: str) -> None:
     if not set(principal.roles).intersection(roles):
         raise HTTPException(403, "Role denied")
+
+
+def require_system_admin(identity: Identity) -> None:
+    if identity.email != "chamathdilshan.dev@gmail.com":
+        raise HTTPException(403, "System admin role required")
