@@ -210,6 +210,17 @@ async def admin_update_application(application_id: uuid.UUID, body: AdminApplica
     return app
 
 
+@router.delete("/admin/hospital-applications/{application_id}", tags=["Hospitals"], status_code=204)
+async def admin_delete_application(application_id: uuid.UUID, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
+    require_system_admin(identity)
+    app = await db.get(OrganizationApplication, application_id)
+    if not app:
+        raise HTTPException(404, "Application not found")
+    await db.delete(app)
+    await db.commit()
+    return Response(status_code=204)
+
+
 @router.get("/hospitals", tags=["Hospitals"], response_model=list[HospitalOutput])
 async def hospitals(identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session),
                     limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
@@ -241,6 +252,20 @@ async def edit_hospital(hospital_id: uuid.UUID, body: HospitalInput, p: Principa
     audit(db, p, "hospital.updated", tenant.id)
     await db.commit()
     return tenant
+
+
+@router.delete("/hospitals/{hospital_id}", tags=["Hospitals"], status_code=204)
+async def delete_hospital(hospital_id: uuid.UUID, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
+    require_role(p, "admin")
+    tenant = await hospital_for(p, hospital_id, db)
+    # Check for dependent records before deletion
+    if await db.scalar(select(Branch.id).where(Branch.tenant_id == tenant.id)):
+        raise HTTPException(409, "Hospital has branches and cannot be deleted")
+    audit(db, p, "hospital.deleted", tenant.id)
+    await db.delete(tenant)
+    await db.commit()
+    return Response(status_code=204)
+
 
 
 @router.get("/branches", tags=["Branches"], response_model=list[BranchOutput])
@@ -284,6 +309,21 @@ async def edit_branch(branch_id: uuid.UUID, body: BranchInput, p: Principal = De
     audit(db, p, "branch.updated", branch.id)
     await db.commit()
     return branch
+
+
+@router.delete("/branches/{branch_id}", tags=["Branches"], status_code=204)
+async def delete_branch(branch_id: uuid.UUID, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
+    require_role(p, "admin")
+    require_scope(p, p.tenant_id, str(branch_id))
+    branch = await db.scalar(select(Branch).where(Branch.id == branch_id, Branch.tenant_id == uuid.UUID(p.tenant_id)).with_for_update())
+    if branch is None:
+        raise HTTPException(404, "Branch not found")
+    if await db.scalar(select(Queue.id).where(Queue.branch_id == branch.id)):
+        raise HTTPException(409, "Branch has queues and cannot be deleted")
+    audit(db, p, "branch.deleted", branch.id)
+    await db.delete(branch)
+    await db.commit()
+    return Response(status_code=204)
 
 
 @router.get("/users", tags=["Users"], response_model=list[ProfileOutput])
@@ -335,3 +375,24 @@ async def edit_membership(membership_id: uuid.UUID, body: MembershipPatch, p: Pr
     audit(db, p, "membership.updated", member.id)
     await db.commit()
     return member
+
+
+@router.delete("/memberships/{membership_id}", tags=["Memberships"], status_code=204)
+async def delete_membership(membership_id: uuid.UUID, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
+    require_role(p, "admin")
+    await db.scalar(select(Branch).where(Branch.id == uuid.UUID(p.branch_id)).with_for_update())
+    member = await db.get(Membership, membership_id)
+    if not member:
+        raise HTTPException(404, "Membership not found")
+    require_scope(p, str(member.tenant_id), str(member.branch_id))
+    
+    if member.role == "admin" and member.active:
+        others = await db.scalar(select(Membership.id).where(Membership.branch_id == member.branch_id,
+            Membership.role == "admin", Membership.active.is_(True), Membership.id != member.id))
+        if not others:
+            raise HTTPException(409, "A branch must retain at least one active admin")
+            
+    audit(db, p, "membership.deleted", member.id)
+    await db.delete(member)
+    await db.commit()
+    return Response(status_code=204)

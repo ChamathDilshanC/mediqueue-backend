@@ -211,6 +211,17 @@ async def update_appointment(appointment_id: uuid.UUID, body: AppointmentPatch, 
     return row
 
 
+@router.delete("/appointments/{appointment_id}", tags=["Appointments"], status_code=204)
+async def delete_appointment(appointment_id: uuid.UUID, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
+    require_role(p, "admin", "staff")
+    await lock_branch(p, db)
+    row = await scoped(Appointment, appointment_id, p, db, lock=True)
+    audit(db, p, "appointment.deleted", row.id)
+    await db.delete(row)
+    await db.commit()
+    return Response(status_code=204)
+
+
 @router.get("/audit-events", tags=["Audit"], response_model=list[AuditOutput])
 async def audit_events(p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session),
                        limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
