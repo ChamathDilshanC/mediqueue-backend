@@ -106,6 +106,9 @@ class BranchInput(HospitalInput):
             raise ValueError("Use a valid IANA timezone") from exc
         return value
 
+class BranchCreateInput(BranchInput):
+    tenant_id: uuid.UUID
+
 
 class HospitalRegister(BranchInput):
     branch_name: Name = "Main branch"
