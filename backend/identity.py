@@ -244,24 +244,43 @@ async def hospital(hospital_id: uuid.UUID, p: Principal = Depends(current_princi
     return await hospital_for(p, hospital_id, db)
 
 
+@router.put("/hospitals/{hospital_id}", tags=["Hospitals"], response_model=HospitalOutput)
 @router.patch("/hospitals/{hospital_id}", tags=["Hospitals"], response_model=HospitalOutput)
-async def edit_hospital(hospital_id: uuid.UUID, body: HospitalInput, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
-    require_role(p, "admin")
-    tenant = await hospital_for(p, hospital_id, db)
+async def edit_hospital(hospital_id: uuid.UUID, body: HospitalInput, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
+    mem = await db.scalar(select(Membership).where(
+        Membership.user_id == uuid.UUID(identity.subject),
+        Membership.tenant_id == hospital_id,
+        Membership.role == "admin",
+        Membership.active.is_(True)
+    ))
+    if not mem:
+        raise HTTPException(403, "Must be an admin of this hospital")
+    tenant = await db.get(Tenant, hospital_id)
+    if not tenant:
+        raise HTTPException(404, "Hospital not found")
     tenant.name = body.name
-    audit(db, p, "hospital.updated", tenant.id)
+    audit(db, Principal(identity.subject, str(hospital_id), str(mem.branch_id), ("admin",)), "hospital.updated", tenant.id)
     await db.commit()
     return tenant
 
 
 @router.delete("/hospitals/{hospital_id}", tags=["Hospitals"], status_code=204)
-async def delete_hospital(hospital_id: uuid.UUID, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
-    require_role(p, "admin")
-    tenant = await hospital_for(p, hospital_id, db)
+async def delete_hospital(hospital_id: uuid.UUID, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
+    mem = await db.scalar(select(Membership).where(
+        Membership.user_id == uuid.UUID(identity.subject),
+        Membership.tenant_id == hospital_id,
+        Membership.role == "admin",
+        Membership.active.is_(True)
+    ))
+    if not mem:
+        raise HTTPException(403, "Must be an admin of this hospital")
+    tenant = await db.get(Tenant, hospital_id)
+    if not tenant:
+        raise HTTPException(404, "Hospital not found")
     # Check for dependent records before deletion
     if await db.scalar(select(Branch.id).where(Branch.tenant_id == tenant.id)):
         raise HTTPException(409, "Hospital has branches and cannot be deleted")
-    audit(db, p, "hospital.deleted", tenant.id)
+    audit(db, Principal(identity.subject, str(hospital_id), str(mem.branch_id), ("admin",)), "hospital.deleted", tenant.id)
     await db.delete(tenant)
     await db.commit()
     return Response(status_code=204)
@@ -297,30 +316,43 @@ async def branch_detail(branch_id: uuid.UUID, p: Principal = Depends(current_pri
     return branch
 
 
+@router.put("/branches/{branch_id}", tags=["Branches"], response_model=BranchOutput)
 @router.patch("/branches/{branch_id}", tags=["Branches"], response_model=BranchOutput)
-async def edit_branch(branch_id: uuid.UUID, body: BranchInput, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
-    require_role(p, "admin")
-    require_scope(p, p.tenant_id, str(branch_id))
-    branch = await db.scalar(select(Branch).where(Branch.id == branch_id, Branch.tenant_id == uuid.UUID(p.tenant_id)).with_for_update())
+async def edit_branch(branch_id: uuid.UUID, body: BranchInput, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
+    branch = await db.scalar(select(Branch).where(Branch.id == branch_id).with_for_update())
     if branch is None:
         raise HTTPException(404, "Branch not found")
+    mem = await db.scalar(select(Membership).where(
+        Membership.user_id == uuid.UUID(identity.subject),
+        Membership.tenant_id == branch.tenant_id,
+        Membership.role == "admin",
+        Membership.active.is_(True)
+    ))
+    if not mem:
+        raise HTTPException(403, "Must be an admin of this hospital")
     branch.name, branch.timezone = body.name, body.timezone
     await db.execute(update(Queue).where(Queue.branch_id == branch_id, Queue.tenant_id == branch.tenant_id).values(timezone=body.timezone))
-    audit(db, p, "branch.updated", branch.id)
+    audit(db, Principal(identity.subject, str(branch.tenant_id), str(branch.id), ("admin",)), "branch.updated", branch.id)
     await db.commit()
     return branch
 
 
 @router.delete("/branches/{branch_id}", tags=["Branches"], status_code=204)
-async def delete_branch(branch_id: uuid.UUID, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
-    require_role(p, "admin")
-    require_scope(p, p.tenant_id, str(branch_id))
-    branch = await db.scalar(select(Branch).where(Branch.id == branch_id, Branch.tenant_id == uuid.UUID(p.tenant_id)).with_for_update())
+async def delete_branch(branch_id: uuid.UUID, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
+    branch = await db.scalar(select(Branch).where(Branch.id == branch_id).with_for_update())
     if branch is None:
         raise HTTPException(404, "Branch not found")
+    mem = await db.scalar(select(Membership).where(
+        Membership.user_id == uuid.UUID(identity.subject),
+        Membership.tenant_id == branch.tenant_id,
+        Membership.role == "admin",
+        Membership.active.is_(True)
+    ))
+    if not mem:
+        raise HTTPException(403, "Must be an admin of this hospital")
     if await db.scalar(select(Queue.id).where(Queue.branch_id == branch.id)):
         raise HTTPException(409, "Branch has queues and cannot be deleted")
-    audit(db, p, "branch.deleted", branch.id)
+    audit(db, Principal(identity.subject, str(branch.tenant_id), str(branch.id), ("admin",)), "branch.deleted", branch.id)
     await db.delete(branch)
     await db.commit()
     return Response(status_code=204)
@@ -357,42 +389,55 @@ async def add_membership(body: MembershipInput, p: Principal = Depends(current_p
     return membership
 
 
+@router.put("/memberships/{membership_id}", tags=["Memberships"], response_model=MembershipOutput)
 @router.patch("/memberships/{membership_id}", tags=["Memberships"], response_model=MembershipOutput)
-async def edit_membership(membership_id: uuid.UUID, body: MembershipPatch, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
-    require_role(p, "admin")
-    # Serialize role changes per branch so simultaneous requests cannot remove every admin.
-    await db.scalar(select(Branch).where(Branch.id == uuid.UUID(p.branch_id)).with_for_update())
+async def edit_membership(membership_id: uuid.UUID, body: MembershipPatch, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
     member = await db.get(Membership, membership_id)
     if not member:
         raise HTTPException(404, "Membership not found")
-    require_scope(p, str(member.tenant_id), str(member.branch_id))
+    mem = await db.scalar(select(Membership).where(
+        Membership.user_id == uuid.UUID(identity.subject),
+        Membership.tenant_id == member.tenant_id,
+        Membership.role == "admin",
+        Membership.active.is_(True)
+    ))
+    if not mem:
+        raise HTTPException(403, "Must be an admin of this hospital")
+    
+    await db.scalar(select(Branch).where(Branch.id == member.branch_id).with_for_update())
     if member.role == "admin" and member.active and (body.role != "admin" or not body.active):
         others = await db.scalar(select(Membership.id).where(Membership.branch_id == member.branch_id,
             Membership.role == "admin", Membership.active.is_(True), Membership.id != member.id))
         if not others:
             raise HTTPException(409, "A branch must retain at least one active admin")
     member.role, member.active = body.role, body.active
-    audit(db, p, "membership.updated", member.id)
+    audit(db, Principal(identity.subject, str(member.tenant_id), str(member.branch_id), ("admin",)), "membership.updated", member.id)
     await db.commit()
     return member
 
 
 @router.delete("/memberships/{membership_id}", tags=["Memberships"], status_code=204)
-async def delete_membership(membership_id: uuid.UUID, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
-    require_role(p, "admin")
-    await db.scalar(select(Branch).where(Branch.id == uuid.UUID(p.branch_id)).with_for_update())
+async def delete_membership(membership_id: uuid.UUID, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
     member = await db.get(Membership, membership_id)
     if not member:
         raise HTTPException(404, "Membership not found")
-    require_scope(p, str(member.tenant_id), str(member.branch_id))
+    mem = await db.scalar(select(Membership).where(
+        Membership.user_id == uuid.UUID(identity.subject),
+        Membership.tenant_id == member.tenant_id,
+        Membership.role == "admin",
+        Membership.active.is_(True)
+    ))
+    if not mem:
+        raise HTTPException(403, "Must be an admin of this hospital")
     
+    await db.scalar(select(Branch).where(Branch.id == member.branch_id).with_for_update())
     if member.role == "admin" and member.active:
         others = await db.scalar(select(Membership.id).where(Membership.branch_id == member.branch_id,
             Membership.role == "admin", Membership.active.is_(True), Membership.id != member.id))
         if not others:
             raise HTTPException(409, "A branch must retain at least one active admin")
             
-    audit(db, p, "membership.deleted", member.id)
+    audit(db, Principal(identity.subject, str(member.tenant_id), str(member.branch_id), ("admin",)), "membership.deleted", member.id)
     await db.delete(member)
     await db.commit()
     return Response(status_code=204)
