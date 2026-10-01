@@ -4,7 +4,7 @@ import uuid
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.security import HTTPAuthorizationCredentials
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Identity, Principal, bearer, current_identity, current_principal, require_role, require_scope, require_system_admin
@@ -361,6 +361,7 @@ async def delete_branch(branch_id: uuid.UUID, identity: Identity = Depends(curre
     if await db.scalar(select(Queue.id).where(Queue.branch_id == branch.id)):
         raise HTTPException(409, "Branch has queues and cannot be deleted")
     audit(db, Principal(identity.subject, str(branch.tenant_id), str(branch.id), ("admin",)), "branch.deleted", branch.id)
+    await db.execute(delete(Membership).where(Membership.branch_id == branch.id))
     await db.delete(branch)
     await db.commit()
     return Response(status_code=204)
