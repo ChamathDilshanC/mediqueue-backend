@@ -98,6 +98,23 @@ class Membership(Base):
     role: Mapped[str] = mapped_column(String(20))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+class OrganizationApplication(Base):
+    __tablename__ = "organization_application"; __table_args__ = {"schema": "iam"}
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
+    applicant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("iam.user_profile.id"), index=True)
+    organization_type: Mapped[str] = mapped_column(String(30))
+    official_name: Mapped[str] = mapped_column(String(200))
+    address: Mapped[str] = mapped_column(Text)
+    phone: Mapped[str] = mapped_column(String(40))
+    official_email: Mapped[str] = mapped_column(String(254))
+    registration_number: Mapped[str] = mapped_column(String(120), default="")
+    license_number: Mapped[str] = mapped_column(String(120), default="")
+    supporting_document_url: Mapped[str] = mapped_column(String(1000), default="")
+    website_url: Mapped[str] = mapped_column(String(500), default="")
+    administrator_name: Mapped[str] = mapped_column(String(200))
+    administrator_role: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(20), default="pending_review", index=True)
+
 
 class Department(Base):
     __tablename__ = "department"; __table_args__ = {"schema": "scheduling"}

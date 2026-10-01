@@ -9,10 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Identity, Principal, bearer, current_identity, current_principal, require_role, require_scope
 from .db import get_session
-from .models import AuditEvent, Branch, Membership, Queue, Tenant, UserProfile
+from .models import AuditEvent, Branch, Membership, OrganizationApplication, Queue, Tenant, UserProfile
 from .schemas import (ERROR_RESPONSES, AuthResult, BranchInput, BranchOutput, Credentials, HospitalInput,
     HospitalOutput, HospitalRegister, HospitalRegistration, MeOutput, MembershipInput,
-    MembershipOutput, MembershipPatch, PasswordChange, ProfileInput, ProfileOutput,
+    MembershipOutput, MembershipPatch, OrganizationApplicationInput, OrganizationApplicationOutput,
+    PasswordChange, ProfileInput, ProfileOutput,
     Recover, Refresh, Register)
 from .settings import get_settings
 
@@ -150,6 +151,23 @@ async def register_hospital(body: HospitalRegister, identity: Identity = Depends
     audit(db, Principal(identity.subject, str(tenant.id), str(branch.id), ("admin",)), "hospital.created", tenant.id)
     await db.commit()
     return {"hospital": tenant, "branch": branch, "membership": membership}
+
+@router.post("/hospital-applications", tags=["Hospitals"], response_model=OrganizationApplicationOutput, status_code=201)
+async def apply_for_organization(
+    body: OrganizationApplicationInput,
+    identity: Identity = Depends(current_identity),
+    db: AsyncSession = Depends(get_session),
+):
+    """Submit a hospital or medical-center application for manual verification."""
+    profile = await ensure_profile(db, identity)
+    application = OrganizationApplication(
+        applicant_id=profile.id,
+        **body.model_dump(),
+    )
+    db.add(application)
+    await db.commit()
+    await db.refresh(application)
+    return application
 
 
 @router.get("/hospitals", tags=["Hospitals"], response_model=list[HospitalOutput])

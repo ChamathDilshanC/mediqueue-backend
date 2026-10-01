@@ -110,6 +110,24 @@ class BranchInput(HospitalInput):
 class HospitalRegister(BranchInput):
     branch_name: Name = "Main branch"
 
+class OrganizationApplicationInput(Input):
+    organization_type: Literal["hospital", "medical_center"]
+    official_name: Name
+    address: str = Field(min_length=5, max_length=1000)
+    phone: str = Field(min_length=7, max_length=40)
+    official_email: str = Field(min_length=3, max_length=254, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+    registration_number: str = Field(default="", max_length=120)
+    license_number: str = Field(default="", max_length=120)
+    supporting_document_url: str = Field(default="", max_length=1000)
+    website_url: str = Field(default="", max_length=500)
+    administrator_name: Name
+    administrator_role: Name
+
+class OrganizationApplicationOutput(OrganizationApplicationInput, Output):
+    id: uuid.UUID
+    applicant_id: uuid.UUID
+    status: Literal["pending_review", "verified", "rejected"]
+
 
 class HospitalOutput(Output):
     id: uuid.UUID
