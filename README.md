@@ -81,7 +81,17 @@ database passwords, service-role keys, or OAuth secrets.
 
 Vercel deploys `backend.main:app`. Set Production environment variables in the
 `mediqueue-backend` Vercel project, then create a new deployment after every
-environment change. Verify:
+environment change. Vercel does not run Alembic migrations as part of the
+Python function build, so run the migration against the production database
+before deploying API changes that add tables:
+
+```powershell
+python -m alembic upgrade head
+```
+
+In particular, organization registration requires migration
+`0003_organization_applications`; without it, `POST /v1/hospital-applications`
+will fail because the application table does not exist. Verify:
 
 ```powershell
 Invoke-RestMethod https://mediqueue-backend-eta.vercel.app/health

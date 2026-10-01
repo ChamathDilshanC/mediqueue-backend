@@ -216,6 +216,34 @@ async def test_hospital_membership_lifecycle_and_scope(api):
     assert branch["tenant_id"] == data["hospital"]["id"]
 
 
+async def test_organization_application_persists_verification_fields(api):
+    client, _ = api
+    user = uuid.uuid4()
+    headers = {"Authorization": f"Bearer {token(user)}"}
+    response = await client.post(
+        "/v1/hospital-applications",
+        headers=headers,
+        json={
+            "organization_type": "medical_center",
+            "official_name": "MediQueue Medical Center",
+            "address": "123 Main Street, Colombo",
+            "phone": "+94112345678",
+            "official_email": "admin@mediqueue.example",
+            "registration_number": "REG-202536",
+            "license_number": "LIC-154121",
+            "supporting_document_url": "",
+            "website_url": "https://mediqueue.example",
+            "administrator_name": "Chamath",
+            "administrator_role": "Manager",
+        },
+    )
+    assert response.status_code == 201, response.text
+    application = response.json()
+    assert application["applicant_id"] == str(user)
+    assert application["status"] == "pending_review"
+    assert application["organization_type"] == "medical_center"
+
+
 async def test_entity_crud_relationships_and_branch_isolation(api):
     client, _ = api
     _, headers, _ = await onboard(client)
