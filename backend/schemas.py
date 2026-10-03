@@ -324,7 +324,7 @@ class AuditOutput(Output):
 
 class WardInput(Input):
     department_id: uuid.UUID
-    ward_code: Name
+    ward_code: str = Field(default="", max_length=50)
     name: Name
     ward_type: str = Field(default="General", max_length=50)
     floor: str = Field(default="", max_length=50)
@@ -357,7 +357,7 @@ class WardOutput(ScopedOutput):
 
 class BedInput(Input):
     ward_id: uuid.UUID
-    bed_number: Name
+    bed_number: str = Field(default="", max_length=50)
     bed_type: Literal["STANDARD", "ICU", "ISOLATION", "PEDIATRIC", "MATERNITY"] = "STANDARD"
     status: Literal["AVAILABLE", "OCCUPIED", "RESERVED", "CLEANING", "MAINTENANCE"] = "AVAILABLE"
     is_active: bool = True

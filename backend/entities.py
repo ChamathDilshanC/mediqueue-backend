@@ -118,6 +118,19 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
             data["branch_id"] = uuid.UUID(p.branch_id)
         if model is Queue:
             data["timezone"] = (await db.get(Branch, uuid.UUID(p.branch_id))).timezone
+        elif model is Patient and not data.get("mrn"):
+            count = await db.scalar(select(func.count()).select_from(Patient).where(Patient.tenant_id == uuid.UUID(p.tenant_id)))
+            year = datetime.now(timezone.utc).year
+            data["mrn"] = f"MRN-{year}-{(count + 1):06d}"
+        elif model is Ward and not data.get("ward_code"):
+            count = await db.scalar(select(func.count()).select_from(Ward).where(*scope(Ward, p)))
+            data["ward_code"] = f"WARD-{(count + 1):03d}"
+        elif model is Bed and not data.get("bed_number"):
+            count = await db.scalar(select(func.count()).select_from(Bed).where(*scope(Bed, p)))
+            data["bed_number"] = f"BED-{(count + 1):03d}"
+        elif model is Department and not data.get("code"):
+            count = await db.scalar(select(func.count()).select_from(Department).where(*scope(Department, p)))
+            data["code"] = f"DEPT-{(count + 1):02d}"
         item = model(**data)
         db.add(item)
         await db.flush()
