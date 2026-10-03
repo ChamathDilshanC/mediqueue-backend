@@ -37,6 +37,8 @@ async def lifespan(app: FastAPI):
             await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS location VARCHAR(200) DEFAULT ''"))
             await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS head_of_dept VARCHAR(200) DEFAULT ''"))
             await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE"))
+            await session.execute(text("ALTER TABLE scheduling.room ADD COLUMN IF NOT EXISTS department_id UUID"))
+            await session.execute(text("ALTER TABLE queue.queue ADD COLUMN IF NOT EXISTS department_id UUID"))
             await session.commit()
             break
     except Exception as exc:

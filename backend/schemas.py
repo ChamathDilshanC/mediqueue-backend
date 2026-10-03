@@ -242,11 +242,21 @@ class PatientOutput(Output):
     external_ref: str
 
 
+class RoomInput(HospitalInput):
+    department_id: uuid.UUID | None = None
+
+
+class RoomOutput(ScopedOutput):
+    department_id: uuid.UUID | None = None
+
+
 class QueueInput(Input):
     name: str = Field(min_length=1, max_length=120)
+    department_id: uuid.UUID | None = None
 
 
 class QueueOutput(ScopedOutput):
+    department_id: uuid.UUID | None = None
     timezone: str
     token_sequence: int
 

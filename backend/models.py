@@ -27,6 +27,7 @@ class Queue(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
     branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.department.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(120))
     timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
     token_sequence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -134,6 +135,7 @@ class Room(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
     branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.department.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(120))
 
 

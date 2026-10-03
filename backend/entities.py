@@ -13,7 +13,7 @@ from .models import (Appointment, AuditEvent, Branch, Department, Doctor, Patien
                      Queue, QueueToken, Room, Schedule, Tenant, Visit)
 from .schemas import (ERROR_RESPONSES, AppointmentInput, AppointmentOutput, AppointmentPatch, AuditOutput,
     DepartmentInput, DepartmentOutput, DoctorInput, DoctorOutput, HospitalInput, PatientInput, PatientOutput, QueueInput,
-    QueueOutput, ScheduleInput, ScheduleOutput, ScopedOutput, VisitInput, VisitOutput)
+    QueueOutput, RoomInput, RoomOutput, ScheduleInput, ScheduleOutput, ScopedOutput, VisitInput, VisitOutput)
 
 router = APIRouter(prefix="/v1", responses=ERROR_RESPONSES)
 READ_ROLES = ("admin", "staff", "reception", "doctor")
@@ -43,7 +43,11 @@ async def lock_branch(p, db):
 
 
 async def validate_entity(model, data, p, db, item_id=None):
-    if model is Doctor:
+    if model is Room and data.get("department_id"):
+        await scoped(Department, data["department_id"], p, db)
+    elif model is Queue and data.get("department_id"):
+        await scoped(Department, data["department_id"], p, db)
+    elif model is Doctor:
         await scoped(Department, data["department_id"], p, db)
     elif model is Schedule:
         await scoped(Doctor, data["doctor_id"], p, db)
@@ -68,7 +72,7 @@ async def validate_entity(model, data, p, db, item_id=None):
 
 
 DEPENDENCIES = {
-    Department: [(Doctor, Doctor.department_id)],
+    Department: [(Doctor, Doctor.department_id), (Room, Room.department_id)],
     Room: [(Schedule, Schedule.room_id)],
     Doctor: [(Schedule, Schedule.doctor_id)],
     Schedule: [(Appointment, Appointment.schedule_id)],
@@ -150,7 +154,7 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
 
 
 resource_routes("departments", Department, DepartmentInput, DepartmentOutput)
-resource_routes("rooms", Room, QueueInput, ScopedOutput)
+resource_routes("rooms", Room, RoomInput, RoomOutput)
 resource_routes("doctors", Doctor, DoctorInput, DoctorOutput)
 resource_routes("schedules", Schedule, ScheduleInput, ScheduleOutput)
 resource_routes("patients", Patient, PatientInput, PatientOutput, ("admin", "staff", "reception"))
