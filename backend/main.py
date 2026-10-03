@@ -39,6 +39,19 @@ async def lifespan(app: FastAPI):
             await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE"))
             await session.execute(text("ALTER TABLE scheduling.room ADD COLUMN IF NOT EXISTS department_id UUID"))
             await session.execute(text("ALTER TABLE queue.queue ADD COLUMN IF NOT EXISTS department_id UUID"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS mrn VARCHAR(50) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS first_name VARCHAR(100) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS last_name VARCHAR(100) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS gender VARCHAR(20) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR(30) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS nic VARCHAR(30) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS mobile VARCHAR(30) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS email VARCHAR(254) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS blood_group VARCHAR(10) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS address_line_1 VARCHAR(200) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS city VARCHAR(100) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS allergies VARCHAR(500) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'ACTIVE'"))
             await session.execute(text("""
                 CREATE TABLE IF NOT EXISTS scheduling.ward (
                     id UUID PRIMARY KEY,

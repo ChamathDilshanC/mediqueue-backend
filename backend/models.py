@@ -37,6 +37,19 @@ class Patient(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
     external_ref: Mapped[str] = mapped_column(String(200))
+    mrn: Mapped[str] = mapped_column(String(50), default="")
+    first_name: Mapped[str] = mapped_column(String(100), default="")
+    last_name: Mapped[str] = mapped_column(String(100), default="")
+    gender: Mapped[str] = mapped_column(String(20), default="")
+    date_of_birth: Mapped[str] = mapped_column(String(30), default="")
+    nic: Mapped[str] = mapped_column(String(30), default="")
+    mobile: Mapped[str] = mapped_column(String(30), default="")
+    email: Mapped[str] = mapped_column(String(254), default="")
+    blood_group: Mapped[str] = mapped_column(String(10), default="")
+    address_line_1: Mapped[str] = mapped_column(String(200), default="")
+    city: Mapped[str] = mapped_column(String(100), default="")
+    allergies: Mapped[str] = mapped_column(String(500), default="")
+    status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
 
 class Visit(Base):
     __tablename__ = "visit"; __table_args__ = {"schema": "queue"}

@@ -234,12 +234,38 @@ class ScheduleOutput(Output):
 
 class PatientInput(Input):
     external_ref: Name
+    mrn: str = Field(default="", max_length=50)
+    first_name: str = Field(default="", max_length=100)
+    last_name: str = Field(default="", max_length=100)
+    gender: str = Field(default="", max_length=20)
+    date_of_birth: str = Field(default="", max_length=30)
+    nic: str = Field(default="", max_length=30)
+    mobile: str = Field(default="", max_length=30)
+    email: str = Field(default="", max_length=254)
+    blood_group: str = Field(default="", max_length=10)
+    address_line_1: str = Field(default="", max_length=200)
+    city: str = Field(default="", max_length=100)
+    allergies: str = Field(default="", max_length=500)
+    status: Literal["ACTIVE", "INACTIVE", "DECEASED", "ARCHIVED"] = "ACTIVE"
 
 
 class PatientOutput(Output):
     id: uuid.UUID
     tenant_id: uuid.UUID
     external_ref: str
+    mrn: str = ""
+    first_name: str = ""
+    last_name: str = ""
+    gender: str = ""
+    date_of_birth: str = ""
+    nic: str = ""
+    mobile: str = ""
+    email: str = ""
+    blood_group: str = ""
+    address_line_1: str = ""
+    city: str = ""
+    allergies: str = ""
+    status: str = "ACTIVE"
 
 
 class RoomInput(HospitalInput):
