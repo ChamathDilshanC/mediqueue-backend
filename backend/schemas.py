@@ -180,11 +180,21 @@ class DepartmentInput(Input):
 
 class DepartmentOutput(ScopedOutput):
     name: str
-    code: str
-    description: str
-    location: str
-    head_of_dept: str
-    is_active: bool
+    code: str = ""
+    description: str = ""
+    location: str = ""
+    head_of_dept: str = ""
+    is_active: bool = True
+
+    @field_validator("code", "description", "location", "head_of_dept", mode="before")
+    @classmethod
+    def default_string(cls, v):
+        return "" if v is None else v
+
+    @field_validator("is_active", mode="before")
+    @classmethod
+    def default_bool(cls, v):
+        return True if v is None else v
 
 
 class DoctorInput(HospitalInput):

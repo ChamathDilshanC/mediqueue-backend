@@ -22,7 +22,27 @@ from .db import get_session
 from .models import Queue, QueueToken, Visit, Patient, Tenant, AuditEvent, OutboxEvent, IdempotencyKey
 from .settings import get_settings
 
+from contextlib import asynccontextmanager
+
 logger = logging.getLogger("mediqueue.api")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Ensure newly added columns exist in the database table if migrations haven't run."""
+    try:
+        async for session in get_session():
+            await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS code VARCHAR(20) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''"))
+            await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS location VARCHAR(200) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS head_of_dept VARCHAR(200) DEFAULT ''"))
+            await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE"))
+            await session.commit()
+            break
+    except Exception as exc:
+        logger.warning("Auto column migration check skipped: %s", exc)
+    yield
+
 
 app = FastAPI(
     title="MediQueue API",
@@ -44,6 +64,7 @@ app = FastAPI(
         {"name": "Queues", "description": "Queue snapshots and token commands."},
         {"name": "Tokens", "description": "Authorized queue-token state transitions."},
     ],
+    lifespan=lifespan,
 )
 
 
@@ -58,6 +79,7 @@ def branded_openapi() -> dict[str, Any]:
 
 
 app.openapi = branded_openapi
+
 
 
 class CheckIn(BaseModel):
