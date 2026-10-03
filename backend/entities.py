@@ -9,11 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Principal, current_principal, require_role
 from .db import get_session
 from .identity import audit
-from .models import (Appointment, AuditEvent, Branch, Department, Doctor, Patient,
-                     Queue, QueueToken, Room, Schedule, Tenant, Visit)
+from .models import (Appointment, AuditEvent, Bed, Branch, Department, Doctor, Patient,
+                     Queue, QueueToken, Room, Schedule, Tenant, Visit, Ward, WardAdmission)
 from .schemas import (ERROR_RESPONSES, AppointmentInput, AppointmentOutput, AppointmentPatch, AuditOutput,
-    DepartmentInput, DepartmentOutput, DoctorInput, DoctorOutput, HospitalInput, PatientInput, PatientOutput, QueueInput,
-    QueueOutput, RoomInput, RoomOutput, ScheduleInput, ScheduleOutput, ScopedOutput, VisitInput, VisitOutput)
+    BedInput, BedOutput, DepartmentInput, DepartmentOutput, DoctorInput, DoctorOutput, HospitalInput, PatientInput, PatientOutput, QueueInput,
+    QueueOutput, RoomInput, RoomOutput, ScheduleInput, ScheduleOutput, ScopedOutput, VisitInput, VisitOutput,
+    WardInput, WardOutput, WardAdmissionInput, WardAdmissionOutput)
 
 router = APIRouter(prefix="/v1", responses=ERROR_RESPONSES)
 READ_ROLES = ("admin", "staff", "reception", "doctor")
@@ -49,6 +50,15 @@ async def validate_entity(model, data, p, db, item_id=None):
         await scoped(Department, data["department_id"], p, db)
     elif model is Doctor:
         await scoped(Department, data["department_id"], p, db)
+    elif model is Ward:
+        await scoped(Department, data["department_id"], p, db)
+    elif model is Bed:
+        await scoped(Ward, data["ward_id"], p, db)
+    elif model is WardAdmission:
+        await scoped(Patient, data["patient_id"], p, db)
+        await scoped(Ward, data["ward_id"], p, db)
+        if data.get("bed_id"):
+            await scoped(Bed, data["bed_id"], p, db)
     elif model is Schedule:
         await scoped(Doctor, data["doctor_id"], p, db)
         await scoped(Room, data["room_id"], p, db)
@@ -72,11 +82,13 @@ async def validate_entity(model, data, p, db, item_id=None):
 
 
 DEPENDENCIES = {
-    Department: [(Doctor, Doctor.department_id), (Room, Room.department_id)],
+    Department: [(Doctor, Doctor.department_id), (Room, Room.department_id), (Ward, Ward.department_id)],
     Room: [(Schedule, Schedule.room_id)],
     Doctor: [(Schedule, Schedule.doctor_id)],
+    Ward: [(Bed, Bed.ward_id), (WardAdmission, WardAdmission.ward_id)],
+    Bed: [(WardAdmission, WardAdmission.bed_id)],
     Schedule: [(Appointment, Appointment.schedule_id)],
-    Patient: [(Visit, Visit.patient_id), (Appointment, Appointment.patient_id)],
+    Patient: [(Visit, Visit.patient_id), (Appointment, Appointment.patient_id), (WardAdmission, WardAdmission.patient_id)],
     Queue: [(QueueToken, QueueToken.queue_id)],
 }
 
@@ -156,6 +168,9 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
 resource_routes("departments", Department, DepartmentInput, DepartmentOutput)
 resource_routes("rooms", Room, RoomInput, RoomOutput)
 resource_routes("doctors", Doctor, DoctorInput, DoctorOutput)
+resource_routes("wards", Ward, WardInput, WardOutput)
+resource_routes("beds", Bed, BedInput, BedOutput)
+resource_routes("ward-admissions", WardAdmission, WardAdmissionInput, WardAdmissionOutput, ("admin", "staff", "reception"))
 resource_routes("schedules", Schedule, ScheduleInput, ScheduleOutput)
 resource_routes("patients", Patient, PatientInput, PatientOutput, ("admin", "staff", "reception"))
 resource_routes("queues", Queue, QueueInput, QueueOutput)

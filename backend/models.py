@@ -170,3 +170,54 @@ class Appointment(Base):
     patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("queue.patient.id"))
     status: Mapped[str] = mapped_column(String(20), default="BOOKED")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Ward(Base):
+    __tablename__ = "ward"; __table_args__ = {"schema": "scheduling"}
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    department_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.department.id"))
+    ward_code: Mapped[str] = mapped_column(String(50))
+    name: Mapped[str] = mapped_column(String(200))
+    ward_type: Mapped[str] = mapped_column(String(50), default="General")
+    floor: Mapped[str] = mapped_column(String(50), default="")
+    building: Mapped[str] = mapped_column(String(100), default="")
+    gender_type: Mapped[str] = mapped_column(String(20), default="Mixed")
+    age_group: Mapped[str] = mapped_column(String(50), default="All")
+    bed_capacity: Mapped[int] = mapped_column(Integer, default=30)
+    in_charge_staff_id: Mapped[str] = mapped_column(String(200), default="")
+    phone_extension: Mapped[str] = mapped_column(String(50), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Bed(Base):
+    __tablename__ = "bed"; __table_args__ = {"schema": "scheduling"}
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    ward_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.ward.id"))
+    bed_number: Mapped[str] = mapped_column(String(50))
+    bed_type: Mapped[str] = mapped_column(String(50), default="STANDARD")
+    status: Mapped[str] = mapped_column(String(20), default="AVAILABLE")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WardAdmission(Base):
+    __tablename__ = "ward_admission"; __table_args__ = {"schema": "scheduling"}
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("queue.patient.id"))
+    ward_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.ward.id"))
+    bed_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.bed.id"), nullable=True)
+    admitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    discharged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    admission_status: Mapped[str] = mapped_column(String(30), default="ADMITTED")
+    assigned_by: Mapped[str] = mapped_column(String(200), default="")
+    discharged_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+

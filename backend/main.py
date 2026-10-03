@@ -39,6 +39,56 @@ async def lifespan(app: FastAPI):
             await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE"))
             await session.execute(text("ALTER TABLE scheduling.room ADD COLUMN IF NOT EXISTS department_id UUID"))
             await session.execute(text("ALTER TABLE queue.queue ADD COLUMN IF NOT EXISTS department_id UUID"))
+            await session.execute(text("""
+                CREATE TABLE IF NOT EXISTS scheduling.ward (
+                    id UUID PRIMARY KEY,
+                    tenant_id UUID NOT NULL,
+                    branch_id UUID NOT NULL,
+                    department_id UUID NOT NULL,
+                    ward_code VARCHAR(50) NOT NULL,
+                    name VARCHAR(200) NOT NULL,
+                    ward_type VARCHAR(50) DEFAULT 'General',
+                    floor VARCHAR(50) DEFAULT '',
+                    building VARCHAR(100) DEFAULT '',
+                    gender_type VARCHAR(20) DEFAULT 'Mixed',
+                    age_group VARCHAR(50) DEFAULT 'All',
+                    bed_capacity INTEGER DEFAULT 30,
+                    in_charge_staff_id VARCHAR(200) DEFAULT '',
+                    phone_extension VARCHAR(50) DEFAULT '',
+                    description TEXT DEFAULT '',
+                    status VARCHAR(20) DEFAULT 'ACTIVE',
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                );
+            """))
+            await session.execute(text("""
+                CREATE TABLE IF NOT EXISTS scheduling.bed (
+                    id UUID PRIMARY KEY,
+                    tenant_id UUID NOT NULL,
+                    branch_id UUID NOT NULL,
+                    ward_id UUID NOT NULL,
+                    bed_number VARCHAR(50) NOT NULL,
+                    bed_type VARCHAR(50) DEFAULT 'STANDARD',
+                    status VARCHAR(20) DEFAULT 'AVAILABLE',
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                );
+            """))
+            await session.execute(text("""
+                CREATE TABLE IF NOT EXISTS scheduling.ward_admission (
+                    id UUID PRIMARY KEY,
+                    tenant_id UUID NOT NULL,
+                    branch_id UUID NOT NULL,
+                    patient_id UUID NOT NULL,
+                    ward_id UUID NOT NULL,
+                    bed_id UUID,
+                    admitted_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    discharged_at TIMESTAMPTZ,
+                    admission_status VARCHAR(30) DEFAULT 'ADMITTED',
+                    assigned_by VARCHAR(200) DEFAULT '',
+                    discharged_by VARCHAR(200) DEFAULT '',
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                );
+            """))
             await session.commit()
             break
     except Exception as exc:

@@ -294,3 +294,75 @@ class AuditOutput(Output):
     entity_id: uuid.UUID
     payload: dict
     created_at: datetime
+
+
+class WardInput(Input):
+    department_id: uuid.UUID
+    ward_code: Name
+    name: Name
+    ward_type: str = Field(default="General", max_length=50)
+    floor: str = Field(default="", max_length=50)
+    building: str = Field(default="", max_length=100)
+    gender_type: Literal["Male", "Female", "Mixed"] = "Mixed"
+    age_group: str = Field(default="All", max_length=50)
+    bed_capacity: int = Field(default=30, ge=1, le=1000)
+    in_charge_staff_id: str = Field(default="", max_length=200)
+    phone_extension: str = Field(default="", max_length=50)
+    description: str = Field(default="", max_length=1000)
+    status: Literal["ACTIVE", "INACTIVE", "MAINTENANCE"] = "ACTIVE"
+
+
+class WardOutput(ScopedOutput):
+    department_id: uuid.UUID
+    ward_code: str
+    name: str
+    ward_type: str = "General"
+    floor: str = ""
+    building: str = ""
+    gender_type: str = "Mixed"
+    age_group: str = "All"
+    bed_capacity: int = 30
+    in_charge_staff_id: str = ""
+    phone_extension: str = ""
+    description: str = ""
+    status: str = "ACTIVE"
+    created_at: datetime
+
+
+class BedInput(Input):
+    ward_id: uuid.UUID
+    bed_number: Name
+    bed_type: Literal["STANDARD", "ICU", "ISOLATION", "PEDIATRIC", "MATERNITY"] = "STANDARD"
+    status: Literal["AVAILABLE", "OCCUPIED", "RESERVED", "CLEANING", "MAINTENANCE"] = "AVAILABLE"
+    is_active: bool = True
+
+
+class BedOutput(ScopedOutput):
+    ward_id: uuid.UUID
+    bed_number: str
+    bed_type: str = "STANDARD"
+    status: str = "AVAILABLE"
+    is_active: bool = True
+    created_at: datetime
+
+
+class WardAdmissionInput(Input):
+    patient_id: uuid.UUID
+    ward_id: uuid.UUID
+    bed_id: uuid.UUID | None = None
+    admission_status: Literal["ADMITTED", "TRANSFERRED", "DISCHARGED", "CANCELLED"] = "ADMITTED"
+    assigned_by: str = Field(default="", max_length=200)
+    discharged_by: str = Field(default="", max_length=200)
+
+
+class WardAdmissionOutput(ScopedOutput):
+    patient_id: uuid.UUID
+    ward_id: uuid.UUID
+    bed_id: uuid.UUID | None = None
+    admitted_at: datetime
+    discharged_at: datetime | None = None
+    admission_status: str = "ADMITTED"
+    assigned_by: str = ""
+    discharged_by: str = ""
+    created_at: datetime
+
