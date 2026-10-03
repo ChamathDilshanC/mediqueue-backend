@@ -2,14 +2,14 @@
 import uuid
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from fastapi.security import HTTPAuthorizationCredentials
-from sqlalchemy import select, update, delete
+from sqlalchemy import func, select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Identity, Principal, bearer, current_identity, current_principal, require_role, require_scope, require_system_admin
 from .db import get_session
-from .models import AuditEvent, Branch, Membership, OrganizationApplication, Queue, Tenant, UserProfile
+from .models import AuditEvent, Branch, Department, Doctor, Membership, OrganizationApplication, Queue, Room, Schedule, Tenant, UserProfile, Visit
 from .schemas import (ERROR_RESPONSES, AuthResult, BranchCreateInput, BranchInput, BranchOutput, Credentials, HospitalInput,
     HospitalOutput, HospitalRegister, HospitalRegistration, MeOutput, MembershipInput,
     MembershipOutput, MembershipPatch, OrganizationApplicationInput, OrganizationApplicationOutput,
@@ -296,21 +296,37 @@ async def branches(identity: Identity = Depends(current_identity), db: AsyncSess
 
 
 @router.post("/branches", tags=["Branches"], response_model=BranchOutput, status_code=201)
-async def create_branch(body: BranchCreateInput, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
+async def create_branch(
+    body: BranchCreateInput,
+    identity: Identity = Depends(current_identity),
+    x_tenant_id: uuid.UUID | None = Header(None),
+    db: AsyncSession = Depends(get_session)
+):
+    tenant_id = body.tenant_id or x_tenant_id
+    if not tenant_id:
+        mem = await db.scalar(select(Membership).where(
+            Membership.user_id == uuid.UUID(identity.subject),
+            Membership.active.is_(True)
+        ))
+        if mem:
+            tenant_id = mem.tenant_id
+    if not tenant_id:
+        raise HTTPException(400, "tenant_id is required")
+
     mem = await db.scalar(select(Membership).where(
         Membership.user_id == uuid.UUID(identity.subject),
-        Membership.tenant_id == body.tenant_id,
+        Membership.tenant_id == tenant_id,
         Membership.role == "admin",
         Membership.active.is_(True)
     ))
     if not mem:
         raise HTTPException(403, "Must be an admin of this hospital to create a branch")
     
-    branch = Branch(tenant_id=body.tenant_id, name=body.name, timezone=body.timezone)
+    branch = Branch(tenant_id=tenant_id, name=body.name, timezone=body.timezone)
     db.add(branch)
     await db.flush()
     db.add(Membership(user_id=uuid.UUID(identity.subject), tenant_id=branch.tenant_id, branch_id=branch.id, role="admin"))
-    audit(db, Principal(identity.subject, str(body.tenant_id), str(branch.id), ("admin",)), "branch.created", branch.id)
+    audit(db, Principal(identity.subject, str(tenant_id), str(branch.id), ("admin",)), "branch.created", branch.id)
     await db.commit()
     return branch
 
@@ -358,8 +374,21 @@ async def delete_branch(branch_id: uuid.UUID, identity: Identity = Depends(curre
     ))
     if not mem:
         raise HTTPException(403, "Must be an admin of this hospital")
-    if await db.scalar(select(Queue.id).where(Queue.branch_id == branch.id)):
-        raise HTTPException(409, "Branch has queues and cannot be deleted")
+
+    branch_count = await db.scalar(
+        select(func.count()).select_from(Branch).where(Branch.tenant_id == branch.tenant_id)
+    )
+    if branch_count <= 1:
+        raise HTTPException(409, "A hospital must retain at least one branch")
+
+    if await db.scalar(select(Queue.id).where(Queue.branch_id == branch.id)) or \
+       await db.scalar(select(Department.id).where(Department.branch_id == branch.id)) or \
+       await db.scalar(select(Room.id).where(Room.branch_id == branch.id)) or \
+       await db.scalar(select(Doctor.id).where(Doctor.branch_id == branch.id)) or \
+       await db.scalar(select(Schedule.id).where(Schedule.branch_id == branch.id)) or \
+       await db.scalar(select(Visit.id).where(Visit.branch_id == branch.id)):
+        raise HTTPException(409, "Branch has dependent records (departments, rooms, doctors, schedules, queues, or visits) and cannot be deleted")
+
     audit(db, Principal(identity.subject, str(branch.tenant_id), str(branch.id), ("admin",)), "branch.deleted", branch.id)
     await db.execute(delete(Membership).where(Membership.branch_id == branch.id))
     await db.delete(branch)

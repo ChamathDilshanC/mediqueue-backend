@@ -107,33 +107,7 @@ class BranchInput(HospitalInput):
         return value
 
 class BranchCreateInput(BranchInput):
-    tenant_id: uuid.UUID
-
-
-class HospitalRegister(BranchInput):
-    branch_name: Name = "Main branch"
-
-class OrganizationApplicationInput(Input):
-    organization_type: Literal["hospital", "medical_center"]
-    official_name: Name
-    address: str = Field(min_length=5, max_length=1000)
-    phone: str = Field(min_length=7, max_length=40)
-    official_email: str = Field(min_length=3, max_length=254, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
-    registration_number: str = Field(default="", max_length=120)
-    license_number: str = Field(default="", max_length=120)
-    supporting_document_url: str = Field(default="", max_length=1000)
-    website_url: str = Field(default="", max_length=500)
-    administrator_name: Name
-    administrator_role: Name
-
-class OrganizationApplicationOutput(OrganizationApplicationInput, Output):
-    id: uuid.UUID
-    applicant_id: uuid.UUID
-    status: Literal["pending_review", "verified", "rejected"]
-
-
-class AdminApplicationPatch(Input):
-    status: Literal["verified", "rejected"]
+    tenant_id: uuid.UUID | None = None
 
 
 class HospitalOutput(Output):
@@ -162,9 +136,55 @@ class MembershipPatch(Input):
     active: bool = True
 
 
+class HospitalRegister(BranchInput):
+    branch_name: Name = "Main branch"
+
+
+class OrganizationApplicationInput(Input):
+    organization_type: Literal["hospital", "medical_center"]
+    official_name: Name
+    address: str = Field(min_length=5, max_length=1000)
+    phone: str = Field(min_length=7, max_length=40)
+    official_email: str = Field(min_length=3, max_length=254, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+    registration_number: str = Field(default="", max_length=120)
+    license_number: str = Field(default="", max_length=120)
+    supporting_document_url: str = Field(default="", max_length=1000)
+    website_url: str = Field(default="", max_length=500)
+    administrator_name: Name
+    administrator_role: Name
+
+
+class OrganizationApplicationOutput(OrganizationApplicationInput, Output):
+    id: uuid.UUID
+    applicant_id: uuid.UUID
+    status: Literal["pending_review", "verified", "rejected"]
+
+
+class AdminApplicationPatch(Input):
+    status: Literal["verified", "rejected"]
+
+
 class ScopedOutput(HospitalOutput):
     tenant_id: uuid.UUID
     branch_id: uuid.UUID
+
+
+class DepartmentInput(Input):
+    name: Name
+    code: str = Field(default="", max_length=20)
+    description: str = Field(default="", max_length=500)
+    location: str = Field(default="", max_length=200)
+    head_of_dept: str = Field(default="", max_length=200)
+    is_active: bool = Field(default=True)
+
+
+class DepartmentOutput(ScopedOutput):
+    name: str
+    code: str
+    description: str
+    location: str
+    head_of_dept: str
+    is_active: bool
 
 
 class DoctorInput(HospitalInput):

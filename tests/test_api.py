@@ -368,3 +368,50 @@ async def test_concurrent_booking_respects_capacity(api):
         json={"patient_id": patient["id"], "schedule_id": schedule["id"]}) for patient in patients])
     assert sum(r.status_code == 201 for r in results) == 1
     assert sum(r.status_code == 409 for r in results) == 3
+
+
+async def test_department_full_features_and_branch_management(api):
+    client, _ = api
+    _, headers, data = await onboard(client)
+
+    # 1. Test Department with full features (code, location, head_of_dept, description, is_active)
+    dept_payload = {
+        "name": "Cardiology",
+        "code": "CARD",
+        "location": "Building B, 3rd Floor",
+        "head_of_dept": "Dr. A. Perera",
+        "description": "Heart and vascular care unit",
+        "is_active": True
+    }
+    dept = await create(client, "departments", headers, dept_payload)
+    assert dept["name"] == "Cardiology"
+    assert dept["code"] == "CARD"
+    assert dept["location"] == "Building B, 3rd Floor"
+    assert dept["head_of_dept"] == "Dr. A. Perera"
+    assert dept["is_active"] is True
+
+    # Update department
+    dept_update = {
+        "name": "Cardiology & Vascular",
+        "code": "CARD-VASC",
+        "location": "Building B, 4th Floor",
+        "head_of_dept": "Dr. B. Silva",
+        "description": "Expanded heart and vascular center",
+        "is_active": True
+    }
+    resp = await client.put(f"/v1/departments/{dept['id']}", headers=headers, json=dept_update)
+    assert resp.status_code == 200, resp.text
+    updated_dept = resp.json()
+    assert updated_dept["name"] == "Cardiology & Vascular"
+    assert updated_dept["code"] == "CARD-VASC"
+
+    # 2. Branch management: cannot delete sole branch of a hospital
+    branch_id = data["branch"]["id"]
+    del_resp = await client.delete(f"/v1/branches/{branch_id}", headers=headers)
+    assert del_resp.status_code == 409
+    assert "at least one branch" in del_resp.json()["detail"]
+
+    # Edit branch
+    edit_resp = await client.put(f"/v1/branches/{branch_id}", headers=headers, json={"name": "Updated Main Branch", "timezone": "Asia/Colombo"})
+    assert edit_resp.status_code == 200
+    assert edit_resp.json()["name"] == "Updated Main Branch"

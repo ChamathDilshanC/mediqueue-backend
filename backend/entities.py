@@ -12,7 +12,7 @@ from .identity import audit
 from .models import (Appointment, AuditEvent, Branch, Department, Doctor, Patient,
                      Queue, QueueToken, Room, Schedule, Tenant, Visit)
 from .schemas import (ERROR_RESPONSES, AppointmentInput, AppointmentOutput, AppointmentPatch, AuditOutput,
-    DoctorInput, DoctorOutput, HospitalInput, PatientInput, PatientOutput, QueueInput,
+    DepartmentInput, DepartmentOutput, DoctorInput, DoctorOutput, HospitalInput, PatientInput, PatientOutput, QueueInput,
     QueueOutput, ScheduleInput, ScheduleOutput, ScopedOutput, VisitInput, VisitOutput)
 
 router = APIRouter(prefix="/v1", responses=ERROR_RESPONSES)
@@ -149,7 +149,7 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
         router.add_api_route(f"/{path}/{{item_id}}", delete_item, methods=["DELETE"], status_code=204, tags=[tag], summary=f"Delete unused {model.__name__.lower()}", name=f"delete_{path}")
 
 
-resource_routes("departments", Department, HospitalInput, ScopedOutput)
+resource_routes("departments", Department, DepartmentInput, DepartmentOutput)
 resource_routes("rooms", Room, QueueInput, ScopedOutput)
 resource_routes("doctors", Doctor, DoctorInput, DoctorOutput)
 resource_routes("schedules", Schedule, ScheduleInput, ScheduleOutput)
