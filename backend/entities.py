@@ -54,11 +54,32 @@ async def validate_entity(model, data, p, db, item_id=None):
         await scoped(Department, data["department_id"], p, db)
     elif model is Bed:
         await scoped(Ward, data["ward_id"], p, db)
+        if item_id and await db.scalar(select(WardAdmission.id).where(WardAdmission.bed_id == item_id, WardAdmission.admission_status == "ADMITTED")):
+            old = await scoped(Bed, item_id, p, db)
+            if data["ward_id"] != old.ward_id or data["status"] != "OCCUPIED" or not data["is_active"]:
+                raise HTTPException(409, "An occupied bed cannot be reassigned or made unavailable")
     elif model is WardAdmission:
         await scoped(Patient, data["patient_id"], p, db)
         await scoped(Ward, data["ward_id"], p, db)
         if data.get("bed_id"):
-            await scoped(Bed, data["bed_id"], p, db)
+            bed = await scoped(Bed, data["bed_id"], p, db, lock=True)
+            if bed.ward_id != data["ward_id"]:
+                raise HTTPException(422, "Bed must belong to the selected ward")
+            if data["admission_status"] == "ADMITTED":
+                occupied = select(WardAdmission.id).where(*scope(WardAdmission, p), WardAdmission.bed_id == bed.id, WardAdmission.admission_status == "ADMITTED")
+                if item_id:
+                    occupied = occupied.where(WardAdmission.id != item_id)
+                old = await db.get(WardAdmission, item_id) if item_id else None
+                if await db.scalar(occupied) or not bed.is_active or (bed.status != "AVAILABLE" and not (old and old.bed_id == bed.id)):
+                    raise HTTPException(409, "Bed is unavailable")
+        if data["admission_status"] == "ADMITTED":
+            active = select(WardAdmission.id).where(*scope(WardAdmission, p), WardAdmission.patient_id == data["patient_id"], WardAdmission.admission_status == "ADMITTED")
+            if item_id:
+                active = active.where(WardAdmission.id != item_id)
+            if await db.scalar(active):
+                raise HTTPException(409, "Patient already has an active admission")
+        if not item_id and data["admission_status"] != "ADMITTED":
+            raise HTTPException(422, "New admissions must start as ADMITTED")
     elif model is Schedule:
         await scoped(Doctor, data["doctor_id"], p, db)
         await scoped(Room, data["room_id"], p, db)
@@ -132,6 +153,8 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
             count = await db.scalar(select(func.count()).select_from(Department).where(*scope(Department, p)))
             data["code"] = f"DEPT-{(count + 1):02d}"
         item = model(**data)
+        if model is WardAdmission and item.bed_id:
+            (await scoped(Bed, item.bed_id, p, db)).status = "OCCUPIED"
         db.add(item)
         await db.flush()
         audit(db, p, f"{path}.created", item.id)
@@ -146,6 +169,17 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
         item = await scoped(model, item_id, p, db, lock=True)
         data = body.model_dump()
         await validate_entity(model, data, p, db, item_id)
+        if model is WardAdmission:
+            if item.admission_status != "ADMITTED":
+                raise HTTPException(409, "Final admissions are immutable")
+            if data["patient_id"] != item.patient_id:
+                raise HTTPException(409, "Admission patient cannot be changed")
+            if item.bed_id and (item.bed_id != data.get("bed_id") or data["admission_status"] != "ADMITTED"):
+                (await scoped(Bed, item.bed_id, p, db)).status = "CLEANING"
+            if data.get("bed_id") and data["admission_status"] == "ADMITTED":
+                (await scoped(Bed, data["bed_id"], p, db)).status = "OCCUPIED"
+            if data["admission_status"] != "ADMITTED":
+                item.discharged_at = datetime.now(timezone.utc)
         for key, value in data.items():
             setattr(item, key, value)
         audit(db, p, f"{path}.updated", item.id)
@@ -158,6 +192,8 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
         if model is Patient:
             await db.scalar(select(Tenant).where(Tenant.id == uuid.UUID(p.tenant_id)).with_for_update())
         item = await scoped(model, item_id, p, db, lock=True)
+        if model is WardAdmission:
+            raise HTTPException(409, "Admission history must be retained; discharge or cancel it instead")
         for child, reference in DEPENDENCIES.get(model, []):
             if await db.scalar(select(child.id).where(reference == item.id)):
                 raise HTTPException(409, "Resource has dependent records; retain its history")

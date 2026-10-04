@@ -118,3 +118,36 @@ commands, and database-backed concurrency paths where PostgreSQL is configured.
 See the [main repository](https://github.com/ChamathDilshanC/mediqueue) for the
 system diagram and [architecture notes](../docs/architecture.md) for ownership
 and rollout decisions.
+
+## Hospital management and patient portal (2026-10-04)
+
+The staff dashboard adds consultations and vital signs, prescriptions/dispensing,
+lab orders/results, LKR invoices and cumulative payment recording, inventory and
+staff contacts/shifts. Each record is branch-scoped, strictly validated and audited;
+updates require a version and reject stale writes. Signed consultations and released
+lab results are immutable. Clinical access is limited to admins/doctors; reception
+can manage billing; staff can manage labs/stock and dispense unchanged prescriptions.
+Invoice balances are calculated server-side and payments cannot be reduced.
+
+`/v1/patient/*` uses the verified identity without granting a staff membership.
+Patient enrollment creates an explicit identity-to-patient ownership link for one
+hospital. Patients can select a center, book/cancel their own appointments, and read
+only their own signed consultations, prescriptions, released results and invoices.
+Existing hospital records are not automatically claimed by matching email/name.
+Self-enrollment creates a new profile; linking/merging pre-existing profiles remains
+an administrative integration task.
+
+`GET /v1/reports/overview` returns exact counts, appointment status totals and
+role-filtered billing/stock summaries. Ward admissions reserve beds transactionally,
+reject duplicate active occupancy, and place released beds in CLEANING status.
+
+Before deploying, run `alembic upgrade head` against PostgreSQL. Revision
+`0006_management` adds patient ownership/module storage and formalizes legacy
+patient/ward schema additions. For a fresh local SQLite database, run
+`python -m backend.init_db`. No production migration or deployment is performed
+by modifying these files. Management history is retained rather than deleted.
+
+Inventory is an editable stock register; dispensing does not automatically decrement
+stock. Billing records cumulative manual payments, not online payment processing or
+a financial ledger. Insurance claims, payroll, procurement automation, PACS/device
+integrations and live realtime fanout require additional integration work.

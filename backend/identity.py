@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Identity, Principal, bearer, current_identity, current_principal, require_role, require_scope, require_system_admin
 from .db import get_session
-from .models import AuditEvent, Branch, Department, Doctor, Membership, OrganizationApplication, Queue, Room, Schedule, Tenant, UserProfile, Visit
+from .models import AuditEvent, Branch, Department, Doctor, ManagementRecord, Membership, OrganizationApplication, Queue, Room, Schedule, Tenant, UserProfile, Visit
 from .schemas import (ERROR_RESPONSES, AuthResult, BranchCreateInput, BranchInput, BranchOutput, Credentials, HospitalInput,
     HospitalOutput, HospitalRegister, HospitalRegistration, MeOutput, MembershipInput,
     MembershipOutput, MembershipPatch, OrganizationApplicationInput, OrganizationApplicationOutput,
@@ -386,7 +386,8 @@ async def delete_branch(branch_id: uuid.UUID, identity: Identity = Depends(curre
        await db.scalar(select(Room.id).where(Room.branch_id == branch.id)) or \
        await db.scalar(select(Doctor.id).where(Doctor.branch_id == branch.id)) or \
        await db.scalar(select(Schedule.id).where(Schedule.branch_id == branch.id)) or \
-       await db.scalar(select(Visit.id).where(Visit.branch_id == branch.id)):
+       await db.scalar(select(Visit.id).where(Visit.branch_id == branch.id)) or \
+       await db.scalar(select(ManagementRecord.id).where(ManagementRecord.branch_id == branch.id)):
         raise HTTPException(409, "Branch has dependent records (departments, rooms, doctors, schedules, queues, or visits) and cannot be deleted")
 
     audit(db, Principal(identity.subject, str(branch.tenant_id), str(branch.id), ("admin",)), "branch.deleted", branch.id)

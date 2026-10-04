@@ -13,6 +13,8 @@ from pathlib import Path
 from .identity import router as identity_router
 from .entities import router as entities_router, lock_branch
 from .portal import router as portal_router
+from .management import router as management_router
+from .patient_portal import router as patient_router
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -415,4 +417,6 @@ async def constraint_conflict(request, exc):
 app.include_router(identity_router)
 app.include_router(entities_router)
 app.include_router(portal_router)
+app.include_router(management_router)
+app.include_router(patient_router)
 app.mount("/assets", StaticFiles(directory=Path(__file__).parent / "static"), name="assets")

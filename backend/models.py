@@ -102,6 +102,30 @@ class UserProfile(Base):
     display_name: Mapped[str] = mapped_column(String(200), default="")
 
 
+class PatientAccount(Base):
+    """Verified identity ownership; staff patient IDs are never inferred from email."""
+    __tablename__ = "patient_account"
+    __table_args__ = (UniqueConstraint("user_id", "tenant_id"), {"schema": "iam"})
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("iam.user_profile.id"), index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("iam.tenant.id"), index=True)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("queue.patient.id"), unique=True)
+
+
+class ManagementRecord(Base):
+    """Validated module payloads with branch scope and optimistic concurrency."""
+    __tablename__ = "management_record"
+    __table_args__ = {"schema": "scheduling"}
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    module: Mapped[str] = mapped_column(String(40), index=True)
+    patient_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("queue.patient.id"), nullable=True)
+    data: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"), default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Membership(Base):
     __tablename__ = "membership"
     __table_args__ = (UniqueConstraint("user_id", "branch_id"), {"schema": "iam"})

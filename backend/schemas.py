@@ -363,7 +363,10 @@ class BedInput(Input):
     is_active: bool = True
 
 
-class BedOutput(ScopedOutput):
+class BedOutput(Output):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    branch_id: uuid.UUID
     ward_id: uuid.UUID
     bed_number: str
     bed_type: str = "STANDARD"
@@ -381,7 +384,10 @@ class WardAdmissionInput(Input):
     discharged_by: str = Field(default="", max_length=200)
 
 
-class WardAdmissionOutput(ScopedOutput):
+class WardAdmissionOutput(Output):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    branch_id: uuid.UUID
     patient_id: uuid.UUID
     ward_id: uuid.UUID
     bed_id: uuid.UUID | None = None
