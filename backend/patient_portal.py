@@ -10,7 +10,8 @@ from .identity import ensure_profile, audit
 from .entities import book_appointment, update_appointment, DEPENDENCIES
 from .schemas import AppointmentInput, AppointmentPatch
 from .management import Input, output
-from .models import Appointment, Branch, Doctor, ManagementRecord, Patient, PatientAccount, Schedule, Tenant
+from .models import Appointment, Bed, Branch, Doctor, ManagementRecord, Patient, PatientAccount, Schedule, Tenant, Ward, WardAdmission
+from .ward_map import stay_summary
 
 router = APIRouter(prefix="/v1/patient", tags=["Patient portal"])
 DEPENDENCIES[Patient].append((PatientAccount, PatientAccount.patient_id))
@@ -64,7 +65,11 @@ async def overview(identity: Identity = Depends(current_identity), db: AsyncSess
                                 .order_by(ManagementRecord.created_at.desc()))).all() if ids else []
     visible = [r for r in records if (r.module == "clinical-records" and r.data.get("status") == "SIGNED")
                or (r.module == "lab-orders" and r.data.get("status") == "RELEASED") or r.module in {"prescriptions", "invoices"}]
+    stays = (await db.execute(select(WardAdmission, Ward, Bed, Branch).join(Ward, Ward.id == WardAdmission.ward_id)
+                             .outerjoin(Bed, Bed.id == WardAdmission.bed_id).join(Branch, Branch.id == WardAdmission.branch_id)
+                             .where(WardAdmission.patient_id.in_(ids)).order_by(WardAdmission.admitted_at.desc()))).all() if ids else []
     return {"profiles": [{"id": str(p.id), "name": p.first_name or p.external_ref, "mrn": p.mrn, "tenant_id": str(p.tenant_id)} for p in profiles],
+            "ward_stays": [{**stay_summary(a, b.timezone), "ward": w.name, "bed": bed.bed_number if bed else None, "timezone": b.timezone} for a, w, bed, b in stays],
             "appointments": [{"id": str(a.id), "status": a.status, "doctor": d.name, "starts_at": s.starts_at} for a, s, d in bookings],
             "records": [{**output(r), "module": r.module} for r in visible]}
 

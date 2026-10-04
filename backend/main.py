@@ -15,13 +15,14 @@ from .entities import router as entities_router, lock_branch
 from .portal import router as portal_router
 from .management import router as management_router
 from .patient_portal import router as patient_router
+from .ward_map import router as ward_map_router
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Principal, current_principal, require_scope
 from .db import get_session
-from .models import Queue, QueueToken, Visit, Patient, Tenant, AuditEvent, OutboxEvent, IdempotencyKey
+from .models import Queue, QueueToken, Visit, Patient, Tenant, AuditEvent, OutboxEvent, IdempotencyKey, ManagementRecord, PatientAccount
 from .settings import get_settings
 
 from contextlib import asynccontextmanager
@@ -104,6 +105,11 @@ async def lifespan(app: FastAPI):
                     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                 );
             """))
+            await session.execute(text("ALTER TABLE scheduling.ward_admission ADD COLUMN IF NOT EXISTS planned_discharge_at TIMESTAMPTZ"))
+            await session.execute(text("ALTER TABLE scheduling.ward_admission ADD COLUMN IF NOT EXISTS bed_assigned_at TIMESTAMPTZ"))
+            connection = await session.connection()
+            await connection.run_sync(lambda sync: ManagementRecord.__table__.create(sync, checkfirst=True))
+            await connection.run_sync(lambda sync: PatientAccount.__table__.create(sync, checkfirst=True))
             await session.commit()
             break
     except Exception as exc:
@@ -415,8 +421,14 @@ async def constraint_conflict(request, exc):
 
 
 app.include_router(identity_router)
+@app.exception_handler(SQLAlchemyError)
+async def database_unavailable(request, exc):
+    logger.error("Database request failed: %s", type(exc).__name__)
+    return JSONResponse(status_code=503, content={"detail": "Healthcare data service is temporarily unavailable. Please try again."})
+
 app.include_router(entities_router)
 app.include_router(portal_router)
 app.include_router(management_router)
 app.include_router(patient_router)
+app.include_router(ward_map_router)
 app.mount("/assets", StaticFiles(directory=Path(__file__).parent / "static"), name="assets")

@@ -59,6 +59,18 @@ async def validate_entity(model, data, p, db, item_id=None):
             if data["ward_id"] != old.ward_id or data["status"] != "OCCUPIED" or not data["is_active"]:
                 raise HTTPException(409, "An occupied bed cannot be reassigned or made unavailable")
     elif model is WardAdmission:
+        old_admission = await db.get(WardAdmission, item_id) if item_id else None
+        admitted_at = data.get("admitted_at") or (old_admission.admitted_at if old_admission else datetime.now(timezone.utc))
+        if admitted_at.tzinfo is None:
+            admitted_at = admitted_at.replace(tzinfo=timezone.utc)
+        if item_id and "planned_discharge_at" not in data:
+            data["planned_discharge_at"] = old_admission.planned_discharge_at
+        if admitted_at > datetime.now(timezone.utc):
+            raise HTTPException(422, "Admission date cannot be in the future")
+        planned = data.get("planned_discharge_at")
+        if planned and (planned.replace(tzinfo=timezone.utc) if planned.tzinfo is None else planned) < admitted_at:
+            raise HTTPException(422, "Planned discharge cannot be before admission")
+        data["admitted_at"] = admitted_at
         await scoped(Patient, data["patient_id"], p, db)
         await scoped(Ward, data["ward_id"], p, db)
         if data.get("bed_id"):
@@ -131,6 +143,8 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
         require_role(p, *write_roles)
         await lock_branch(p, db)
         data = body.model_dump()
+        if model is WardAdmission and "planned_discharge_at" not in body.model_fields_set:
+            data.pop("planned_discharge_at", None)
         await validate_entity(model, data, p, db)
         if model is Visit:
             await scoped(Patient, data["patient_id"], p, db)
@@ -154,6 +168,7 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
             data["code"] = f"DEPT-{(count + 1):02d}"
         item = model(**data)
         if model is WardAdmission and item.bed_id:
+            item.bed_assigned_at = item.admitted_at
             (await scoped(Bed, item.bed_id, p, db)).status = "OCCUPIED"
         db.add(item)
         await db.flush()
@@ -168,6 +183,8 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
             await db.scalar(select(Tenant).where(Tenant.id == uuid.UUID(p.tenant_id)).with_for_update())
         item = await scoped(model, item_id, p, db, lock=True)
         data = body.model_dump()
+        if model is WardAdmission and "planned_discharge_at" not in body.model_fields_set:
+            data.pop("planned_discharge_at", None)
         await validate_entity(model, data, p, db, item_id)
         if model is WardAdmission:
             if item.admission_status != "ADMITTED":
@@ -178,6 +195,10 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
                 (await scoped(Bed, item.bed_id, p, db)).status = "CLEANING"
             if data.get("bed_id") and data["admission_status"] == "ADMITTED":
                 (await scoped(Bed, data["bed_id"], p, db)).status = "OCCUPIED"
+                if data["bed_id"] != item.bed_id:
+                    item.bed_assigned_at = datetime.now(timezone.utc)
+                elif not item.bed_assigned_at or item.bed_assigned_at == item.admitted_at:
+                    item.bed_assigned_at = data["admitted_at"]
             if data["admission_status"] != "ADMITTED":
                 item.discharged_at = datetime.now(timezone.utc)
         for key, value in data.items():

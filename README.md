@@ -151,3 +151,11 @@ Inventory is an editable stock register; dispensing does not automatically decre
 stock. Billing records cumulative manual payments, not online payment processing or
 a financial ledger. Insurance claims, payroll, procurement automation, PACS/device
 integrations and live realtime fanout require additional integration work.
+## Ward occupancy
+
+Run `alembic upgrade head` before deploying the ward board (revision
+`0007_ward_stay_dates`). Staff can fetch `/v1/wards/{ward_id}/bed-map` in their branch.
+Admissions support `admitted_at` and nullable `planned_discharge_at`; allocation
+timestamps are maintained by bed assignment. Day counts include admission day as
+day 1 in the branch timezone and stop at actual discharge. Patient overview returns
+only owned ward stays. Database errors use sanitized JSON 503 responses.

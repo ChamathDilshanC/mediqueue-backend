@@ -382,6 +382,8 @@ class WardAdmissionInput(Input):
     admission_status: Literal["ADMITTED", "TRANSFERRED", "DISCHARGED", "CANCELLED"] = "ADMITTED"
     assigned_by: str = Field(default="", max_length=200)
     discharged_by: str = Field(default="", max_length=200)
+    admitted_at: AwareDatetime | None = None
+    planned_discharge_at: AwareDatetime | None = None
 
 
 class WardAdmissionOutput(Output):
@@ -393,6 +395,8 @@ class WardAdmissionOutput(Output):
     bed_id: uuid.UUID | None = None
     admitted_at: datetime
     discharged_at: datetime | None = None
+    planned_discharge_at: datetime | None = None
+    bed_assigned_at: datetime | None = None
     admission_status: str = "ADMITTED"
     assigned_by: str = ""
     discharged_by: str = ""

@@ -253,6 +253,8 @@ class WardAdmission(Base):
     bed_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.bed.id"), nullable=True)
     admitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     discharged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    planned_discharge_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    bed_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     admission_status: Mapped[str] = mapped_column(String(30), default="ADMITTED")
     assigned_by: Mapped[str] = mapped_column(String(200), default="")
     discharged_by: Mapped[str] = mapped_column(String(200), default="")
