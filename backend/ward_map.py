@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Principal, current_principal, require_role
 from .db import get_session
 from .entities import READ_ROLES, scope, scoped
-from .models import Bed, Branch, Patient, Ward, WardAdmission
+from .models import Bed, Branch, Patient, Room, Ward, WardAdmission
 
 router = APIRouter(prefix="/v1", tags=["Ward bed maps"])
 
@@ -62,6 +62,8 @@ class MapBed(BaseModel):
     type: str
     status: str
     active: bool
+    room_id: uuid.UUID | None = None
+    room_name: str | None = None
     admission: StayOutput | None
 
 class MapWard(BaseModel):
@@ -86,7 +88,12 @@ async def bed_map(ward_id: uuid.UUID, p: Principal = Depends(current_principal),
     require_role(p, *READ_ROLES)
     ward = await scoped(Ward, ward_id, p, db)
     branch = await db.get(Branch, uuid.UUID(p.branch_id))
-    beds = (await db.scalars(select(Bed).where(*scope(Bed, p), Bed.ward_id == ward.id).order_by(Bed.bed_number, Bed.id))).all()
+    beds = (await db.execute(
+        select(Bed, Room.name)
+        .outerjoin(Room, Room.id == Bed.room_id)
+        .where(*scope(Bed, p), Bed.ward_id == ward.id)
+        .order_by(Bed.bed_number, Bed.id)
+    )).all()
     rows = (await db.execute(select(WardAdmission, Patient).join(Patient, Patient.id == WardAdmission.patient_id)
                              .where(*scope(WardAdmission, p), WardAdmission.ward_id == ward.id, Patient.tenant_id == ward.tenant_id)
                              .order_by(WardAdmission.admitted_at.desc(), WardAdmission.created_at.desc(), WardAdmission.id))).all()
@@ -98,7 +105,7 @@ async def bed_map(ward_id: uuid.UUID, p: Principal = Depends(current_principal),
     now = datetime.now(timezone.utc)
     summary = {key: 0 for key in ("total", "occupied", "available", "reserved", "cleaning", "maintenance", "inactive", "due_today", "overdue")}
     output = []
-    for bed in beds:
+    for bed, room_name in beds:
         pair = latest.get(bed.id)
         stay = None
         status = bed.status if bed.is_active else "INACTIVE"
@@ -112,7 +119,9 @@ async def bed_map(ward_id: uuid.UUID, p: Principal = Depends(current_principal),
                 if stay["discharge_state"] == "OVERDUE": summary["overdue"] += 1
         summary["total"] += 1
         if status.lower() in summary: summary[status.lower()] += 1
-        output.append({"id": str(bed.id), "number": bed.bed_number, "type": bed.bed_type, "status": status, "active": bed.is_active, "admission": stay})
+        output.append({"id": str(bed.id), "number": bed.bed_number, "type": bed.bed_type,
+                       "status": status, "active": bed.is_active, "room_id": str(bed.room_id) if bed.room_id else None,
+                       "room_name": room_name, "admission": stay})
     return {"ward": {"id": str(ward.id), "name": ward.name, "code": ward.ward_code, "type": ward.ward_type,
                      "floor": ward.floor, "building": ward.building, "capacity": ward.bed_capacity},
             "timezone": branch.timezone, "as_of": now, "summary": summary, "beds": output}

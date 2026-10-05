@@ -310,10 +310,12 @@ class PatientOutput(Output):
 
 class RoomInput(HospitalInput):
     department_id: uuid.UUID | None = None
+    ward_id: uuid.UUID | None = None
 
 
 class RoomOutput(ScopedOutput):
     department_id: uuid.UUID | None = None
+    ward_id: uuid.UUID | None = None
 
 
 class QueueInput(Input):
@@ -427,6 +429,7 @@ class WardOutput(ScopedOutput):
 
 class BedInput(Input):
     ward_id: uuid.UUID
+    room_id: uuid.UUID | None = None
     bed_number: str = Field(default="", max_length=50)
     bed_type: Literal["STANDARD", "ICU", "ISOLATION", "PEDIATRIC", "MATERNITY"] = "STANDARD"
     status: Literal["AVAILABLE", "OCCUPIED", "RESERVED", "CLEANING", "MAINTENANCE"] = "AVAILABLE"
@@ -438,6 +441,7 @@ class BedOutput(Output):
     tenant_id: uuid.UUID
     branch_id: uuid.UUID
     ward_id: uuid.UUID
+    room_id: uuid.UUID | None = None
     bed_number: str
     bed_type: str = "STANDARD"
     status: str = "AVAILABLE"

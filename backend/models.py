@@ -186,6 +186,7 @@ class Room(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
     branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.department.id"), nullable=True)
+    ward_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.ward.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(120))
 
 
@@ -258,6 +259,7 @@ class Bed(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
     branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
     ward_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.ward.id"))
+    room_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.room.id"), nullable=True)
     bed_number: Mapped[str] = mapped_column(String(50))
     bed_type: Mapped[str] = mapped_column(String(50), default="STANDARD")
     status: Mapped[str] = mapped_column(String(20), default="AVAILABLE")

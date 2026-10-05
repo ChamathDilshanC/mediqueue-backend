@@ -49,8 +49,11 @@ async def validate_entity(model, data, p, db, item_id=None):
             await scoped(Room, data["room_id"], p, db)
         if data.get("service_type") == "CONSULTATION" and not data.get("room_id"):
             raise HTTPException(422, "Consultation queues require a doctor room")
-    if model is Room and data.get("department_id"):
-        await scoped(Department, data["department_id"], p, db)
+    if model is Room:
+        if data.get("department_id"):
+            await scoped(Department, data["department_id"], p, db)
+        if data.get("ward_id"):
+            await scoped(Ward, data["ward_id"], p, db)
     elif model is Queue and data.get("department_id"):
         await scoped(Department, data["department_id"], p, db)
     elif model is Doctor:
@@ -71,6 +74,10 @@ async def validate_entity(model, data, p, db, item_id=None):
         await scoped(Department, data["department_id"], p, db)
     elif model is Bed:
         await scoped(Ward, data["ward_id"], p, db)
+        if data.get("room_id"):
+            room = await scoped(Room, data["room_id"], p, db)
+            if room.ward_id and room.ward_id != data["ward_id"]:
+                raise HTTPException(422, "Room must belong to the selected ward")
         if item_id and await db.scalar(select(WardAdmission.id).where(WardAdmission.bed_id == item_id, WardAdmission.admission_status == "ADMITTED")):
             old = await scoped(Bed, item_id, p, db)
             if data["ward_id"] != old.ward_id or data["status"] != "OCCUPIED" or not data["is_active"]:
