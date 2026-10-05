@@ -195,6 +195,9 @@ async def test_auth_rate_limits_preserve_status_and_safe_retry_metadata(api, mon
 async def test_hospital_membership_lifecycle_and_scope(api):
     client, _ = api
     owner, headers, data = await onboard(client)
+    account = (await client.get("/v1/auth/me", headers=headers)).json()
+    assert account["memberships"][0]["hospital_name"] == data["hospital"]["name"]
+    assert account["memberships"][0]["branch_name"] == data["branch"]["name"]
     _, other, other_data = await onboard(client, "Another Hospital")
     assert len((await client.get("/v1/hospitals", headers=headers)).json()) == 1
     response = await client.get(f"/v1/hospitals/{other_data['hospital']['id']}", headers=headers)

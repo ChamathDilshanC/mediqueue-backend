@@ -86,8 +86,13 @@ class MembershipOutput(Output):
     active: bool
 
 
+class AccountMembershipOutput(MembershipOutput):
+    hospital_name: str
+    branch_name: str
+
+
 class MeOutput(ProfileOutput):
-    memberships: list[MembershipOutput]
+    memberships: list[AccountMembershipOutput]
 
 
 class HospitalInput(Input):

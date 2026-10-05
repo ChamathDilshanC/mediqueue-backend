@@ -78,6 +78,16 @@ async def overview(identity: Identity = Depends(current_identity), db: AsyncSess
                 "address": b.address, "latitude": b.latitude, "longitude": b.longitude} for a, s, d, b, t in bookings],
             "records": [{**output(r), "module": r.module} for r in visible]}
 
+@router.get("/doctors/{branch_id}")
+async def doctors(branch_id: uuid.UUID, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
+    branch = await db.get(Branch, branch_id)
+    if not branch:
+        raise HTTPException(404, "Branch not found")
+    rows = (await db.scalars(select(Doctor).where(Doctor.branch_id == branch_id,
+        Doctor.tenant_id == branch.tenant_id).order_by(Doctor.name).limit(500))).all()
+    return [{"id": str(d.id), "name": d.name, "specialty": d.specialty} for d in rows]
+
+
 @router.get("/schedules/{branch_id}")
 async def schedules(branch_id: uuid.UUID, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
     from datetime import datetime, timezone

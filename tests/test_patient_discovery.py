@@ -108,3 +108,17 @@ async def test_live_queue_counts_estimates_and_patient_privacy(api):
     summary = (await client.get(path, headers=owner)).json()[0]
     assert summary["estimate_source"] == "recent_service_times"
     assert summary["average_service_minutes"] == 4 and summary["estimated_wait_minutes"] == 8
+
+
+async def test_patient_doctors_visible_without_schedules_and_branch_scoped(api):
+    client, _ = api
+    _, admin, data = await onboard(client)
+    _, other, other_data = await onboard(client, "Other Hospital")
+    department = await create(client, "departments", admin, {"name": "Cardiology"})
+    doctor = await create(client, "doctors", admin, {"name": "Dr Visible", "department_id": department["id"], "specialty": "Cardiology"})
+    patient = {"Authorization": f"Bearer {token(uuid.uuid4())}"}
+    response = await client.get(f"/v1/patient/doctors/{data['branch']['id']}", headers=patient)
+    assert response.status_code == 200
+    assert response.json() == [{"id": doctor["id"], "name": "Dr Visible", "specialty": "Cardiology"}]
+    assert (await client.get(f"/v1/patient/doctors/{other_data['branch']['id']}", headers=patient)).json() == []
+    assert (await client.get(f"/v1/patient/schedules/{data['branch']['id']}", headers=patient)).json() == []

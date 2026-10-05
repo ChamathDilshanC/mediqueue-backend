@@ -123,7 +123,13 @@ async def change_password(body: PasswordChange, identity: Identity = Depends(cur
 @router.get("/auth/me", tags=["Users"], response_model=MeOutput)
 async def me(identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
     profile = await ensure_profile(db, identity)
-    memberships = (await db.scalars(select(Membership).where(Membership.user_id == profile.id))).all()
+    rows = (await db.execute(select(Membership, Tenant.name, Branch.name)
+        .join(Tenant, Tenant.id == Membership.tenant_id)
+        .join(Branch, Branch.id == Membership.branch_id)
+        .where(Membership.user_id == profile.id))).all()
+    memberships = [{**MembershipOutput.model_validate(member).model_dump(),
+                    "hospital_name": hospital, "branch_name": branch}
+                   for member, hospital, branch in rows]
     await db.commit()
     return {"id": profile.id, "display_name": profile.display_name, "memberships": memberships}
 
