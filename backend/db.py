@@ -1,6 +1,8 @@
 """Async SQLAlchemy engine, session dependency and declarative base."""
 from collections.abc import AsyncGenerator
 from pathlib import Path
+import os
+from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy import event, inspect, text
 from sqlalchemy.orm import DeclarativeBase
@@ -9,7 +11,16 @@ from .settings import get_settings
 class Base(DeclarativeBase):
     """Base class for all owned database tables."""
 
-engine = create_async_engine(get_settings().database_url, future=True)
+def engine_options(database_url: str) -> dict:
+    """Avoid stale sockets and cross-request connection reuse in serverless runtimes."""
+    options = {"future": True, "pool_pre_ping": True}
+    if database_url.startswith("postgresql+asyncpg") and os.getenv("VERCEL"):
+        options["poolclass"] = NullPool
+        options["connect_args"] = {"timeout": 10, "prepared_statement_cache_size": 0}
+    return options
+
+
+engine = create_async_engine(get_settings().database_url, **engine_options(get_settings().database_url))
 if get_settings().database_url.startswith("sqlite"):
     @event.listens_for(engine.sync_engine, "connect")
     def _attach_sqlite_schemas(dbapi_connection, _connection_record):

@@ -444,7 +444,9 @@ async def constraint_conflict(request, exc):
 app.include_router(identity_router)
 @app.exception_handler(SQLAlchemyError)
 async def database_unavailable(request, exc):
-    logger.error("Database request failed: %s", type(exc).__name__)
+    logger.error("Database request failed: type=%s driver=%s sqlstate=%s path=%s",
+                 type(exc).__name__, type(getattr(exc, "orig", None)).__name__,
+                 getattr(getattr(exc, "orig", None), "sqlstate", None), request.url.path)
     return JSONResponse(status_code=503, content={"detail": "Healthcare data service is temporarily unavailable. Please try again."})
 
 app.include_router(entities_router)
