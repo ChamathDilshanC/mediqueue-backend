@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Identity, Principal, current_identity
 from .db import get_session
 from .identity import ensure_profile, audit
-from .entities import book_appointment, update_appointment, DEPENDENCIES
+from .entities import create_appointment, update_appointment, DEPENDENCIES
 from .schemas import AppointmentInput, AppointmentPatch
 from .management import Input, output
 from .models import Appointment, Bed, Branch, Doctor, ManagementRecord, Patient, PatientAccount, Schedule, Tenant, Ward, WardAdmission
@@ -73,7 +73,7 @@ async def overview(identity: Identity = Depends(current_identity), db: AsyncSess
                              .where(WardAdmission.patient_id.in_(ids)).order_by(WardAdmission.admitted_at.desc()))).all() if ids else []
     return {"profiles": [{"id": str(p.id), "name": p.first_name or p.external_ref, "mrn": p.mrn, "tenant_id": str(p.tenant_id)} for p in profiles],
             "ward_stays": [{**stay_summary(a, b.timezone), "ward": w.name, "bed": bed.bed_number if bed else None, "timezone": b.timezone} for a, w, bed, b in stays],
-            "appointments": [{"id": str(a.id), "schedule_id": str(s.id), "status": a.status, "doctor": d.name,
+            "appointments": [{"id": str(a.id), "schedule_id": str(s.id), "status": a.status, "review_reason": a.review_reason, "reviewed_at": a.reviewed_at, "doctor": d.name,
                 "starts_at": s.starts_at, "ends_at": s.ends_at, "center": f"{t.name} · {b.name}", "timezone": b.timezone,
                 "address": b.address, "latitude": b.latitude, "longitude": b.longitude} for a, s, d, b, t in bookings],
             "records": [{**output(r), "module": r.module} for r in visible]}
@@ -85,11 +85,11 @@ async def schedules(branch_id: uuid.UUID, identity: Identity = Depends(current_i
                             .where(Schedule.branch_id == branch_id, Schedule.ends_at > datetime.now(timezone.utc))
                             .order_by(Schedule.starts_at).limit(200))).all()
     counts = dict((await db.execute(select(Appointment.schedule_id, func.count()).where(
-        Appointment.schedule_id.in_([s.id for s, _ in rows]), Appointment.status != "CANCELLED"
+        Appointment.schedule_id.in_([s.id for s, _ in rows]), Appointment.status.notin_(("CANCELLED", "REJECTED"))
     ).group_by(Appointment.schedule_id))).all()) if rows else {}
     links = select(PatientAccount.patient_id).where(PatientAccount.user_id == uuid.UUID(identity.subject))
     booked = set((await db.scalars(select(Appointment.schedule_id).where(
-        Appointment.patient_id.in_(links), Appointment.status != "CANCELLED",
+        Appointment.patient_id.in_(links), Appointment.status.notin_(("CANCELLED", "REJECTED")),
         Appointment.schedule_id.in_([s.id for s, _ in rows])))).all()) if rows else set()
     return [{"id": str(s.id), "doctor": d.name, "specialty": d.specialty, "starts_at": s.starts_at,
              "ends_at": s.ends_at, "capacity": s.capacity, "remaining": max(0, s.capacity - counts.get(s.id, 0)),
@@ -106,7 +106,7 @@ async def book(body: Booking, identity: Identity = Depends(current_identity), db
     link = await account(identity, db, schedule.tenant_id)
     # Reuse the transactional staff command only after enforcing identity ownership.
     principal = Principal(identity.subject, str(schedule.tenant_id), str(schedule.branch_id), ("reception",))
-    row = await book_appointment(AppointmentInput(schedule_id=schedule.id, patient_id=link.patient_id), principal, db)
+    row = await create_appointment(AppointmentInput(schedule_id=schedule.id, patient_id=link.patient_id), principal, db, patient_requested=True)
     return {"id": str(row.id), "status": row.status}
 
 @router.patch("/appointments/{appointment_id}/cancel")

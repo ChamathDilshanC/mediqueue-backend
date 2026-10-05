@@ -323,10 +323,15 @@ class AppointmentInput(VisitInput):
 
 
 class AppointmentPatch(Input):
-    status: Literal["CHECKED_IN", "CANCELLED", "COMPLETED", "NO_SHOW"]
+    status: Literal["BOOKED", "REJECTED", "CHECKED_IN", "CANCELLED", "COMPLETED", "NO_SHOW"]
+    reason: str = Field(default="", max_length=500)
 
 
 class AppointmentOutput(VisitOutput):
+    source: str = "STAFF"
+    review_reason: str = ""
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
     schedule_id: uuid.UUID
     status: str
     created_at: datetime

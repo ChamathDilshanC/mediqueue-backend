@@ -39,6 +39,10 @@ async def lifespan(app: FastAPI):
             if session.bind.dialect.name == "sqlite":
                 await session.run_sync(lambda sync_session: ensure_sqlite_discovery_columns(sync_session.connection()))
                 await session.commit()
+            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'STAFF'"))
+            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS review_reason VARCHAR(500) NOT NULL DEFAULT ''"))
+            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(200)"))
+            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ"))
             await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS address VARCHAR(500) NOT NULL DEFAULT ''"))
             await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS phone VARCHAR(40) NOT NULL DEFAULT ''"))
             await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION"))

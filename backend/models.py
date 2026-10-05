@@ -213,6 +213,10 @@ class Appointment(Base):
     schedule_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.schedule.id"))
     patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("queue.patient.id"))
     status: Mapped[str] = mapped_column(String(20), default="BOOKED")
+    source: Mapped[str] = mapped_column(String(20), default="STAFF", server_default="STAFF")
+    review_reason: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    reviewed_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

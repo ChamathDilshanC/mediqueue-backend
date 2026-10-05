@@ -30,6 +30,7 @@ def ensure_sqlite_discovery_columns(connection):
     if connection.dialect.name != "sqlite":
         return
     additions = {
+        ("scheduling", "appointment"): {"source": "VARCHAR(20) NOT NULL DEFAULT 'STAFF'", "review_reason": "VARCHAR(500) NOT NULL DEFAULT ''", "reviewed_by": "VARCHAR(200)", "reviewed_at": "DATETIME"},
         ("iam", "branch"): {"address": "VARCHAR(500) NOT NULL DEFAULT ''", "phone": "VARCHAR(40) NOT NULL DEFAULT ''", "latitude": "FLOAT", "longitude": "FLOAT"},
         ("queue", "queue"): {"average_service_minutes": "INTEGER NOT NULL DEFAULT 5"},
     }

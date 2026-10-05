@@ -297,6 +297,30 @@ resource_routes("queues", Queue, QueueInput, QueueOutput)
 resource_routes("visits", Visit, VisitInput, VisitOutput, ("admin", "staff", "reception"), deletable=False)
 
 
+@router.get("/appointment-inbox", tags=["Appointments"])
+async def appointment_inbox(p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session),
+                            status: str = Query("", pattern="^(|PENDING|BOOKED|REJECTED|CHECKED_IN|COMPLETED|CANCELLED|NO_SHOW)$"),
+                            q: str = Query("", max_length=200), limit: int = Query(20, ge=1, le=200), offset: int = Query(0, ge=0)):
+    require_role(p, *READ_ROLES)
+    base = select(Appointment, Patient, Schedule, Doctor, Room, Branch).join(Patient, Patient.id == Appointment.patient_id).join(
+        Schedule, Schedule.id == Appointment.schedule_id).join(Doctor, Doctor.id == Schedule.doctor_id).join(
+        Room, Room.id == Schedule.room_id).join(Branch, Branch.id == Appointment.branch_id).where(*scope(Appointment, p))
+    counts = dict((await db.execute(select(Appointment.status, func.count()).where(*scope(Appointment, p)).group_by(Appointment.status))).all())
+    if status:
+        base = base.where(Appointment.status == status)
+    if q.strip():
+        term = "%" + q.strip().replace("%", "\\%").replace("_", "\\_") + "%"
+        base = base.where(or_(Patient.first_name.ilike(term, escape="\\"), Patient.last_name.ilike(term, escape="\\"),
+                             Patient.external_ref.ilike(term, escape="\\"), Patient.mrn.ilike(term, escape="\\"), Doctor.name.ilike(term, escape="\\")))
+    total = await db.scalar(select(func.count()).select_from(base.subquery()))
+    rows = (await db.execute(base.order_by(Appointment.created_at.desc(), Appointment.id).offset(offset).limit(limit))).all()
+    return {"total": total, "counts": counts, "items": [{**AppointmentOutput.model_validate(a).model_dump(),
+        "patient_name": (patient.first_name + " " + patient.last_name).strip() or patient.external_ref,
+        "patient_ref": patient.mrn or patient.external_ref, "doctor": doctor.name, "room": room.name,
+        "starts_at": schedule.starts_at, "ends_at": schedule.ends_at, "timezone": branch.timezone,
+        "branch": branch.name} for a, patient, schedule, doctor, room, branch in rows]}
+
+
 @router.get("/appointments", tags=["Appointments"], response_model=list[AppointmentOutput])
 async def appointments(p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session),
                        limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
@@ -313,6 +337,10 @@ async def appointment(appointment_id: uuid.UUID, p: Principal = Depends(current_
 
 @router.post("/appointments", tags=["Appointments"], response_model=AppointmentOutput, status_code=201)
 async def book_appointment(body: AppointmentInput, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
+    return await create_appointment(body, p, db)
+
+
+async def create_appointment(body, p, db, patient_requested=False):
     """Book against a locked schedule. Reject duplicate active bookings, full or ended sessions."""
     require_role(p, "admin", "staff", "reception")
     await lock_branch(p, db)
@@ -321,16 +349,16 @@ async def book_appointment(body: AppointmentInput, p: Principal = Depends(curren
     ends_at = schedule.ends_at.replace(tzinfo=timezone.utc) if schedule.ends_at.tzinfo is None else schedule.ends_at
     if ends_at <= datetime.now(timezone.utc):
         raise HTTPException(409, "Schedule has ended")
-    active = [Appointment.schedule_id == schedule.id, Appointment.status != "CANCELLED"]
+    active = [Appointment.schedule_id == schedule.id, Appointment.status.notin_(("CANCELLED", "REJECTED"))]
     if await db.scalar(select(Appointment.id).where(*active, Appointment.patient_id == body.patient_id)):
         raise HTTPException(409, "Patient already has a booking for this schedule")
     count = await db.scalar(select(func.count()).select_from(Appointment).where(*active))
     if count >= schedule.capacity:
         raise HTTPException(409, "Schedule is full")
-    row = Appointment(tenant_id=uuid.UUID(p.tenant_id), branch_id=uuid.UUID(p.branch_id), **body.model_dump())
+    row = Appointment(tenant_id=uuid.UUID(p.tenant_id), branch_id=uuid.UUID(p.branch_id), **body.model_dump(), status="PENDING" if patient_requested else "BOOKED", source="PATIENT" if patient_requested else "STAFF")
     db.add(row)
     await db.flush()
-    audit(db, p, "appointment.booked", row.id)
+    audit(db, p, "appointment.requested" if patient_requested else "appointment.booked", row.id)
     await db.commit()
     return row
 
@@ -340,12 +368,22 @@ async def update_appointment(appointment_id: uuid.UUID, body: AppointmentPatch, 
     require_role(p, "admin", "staff", "reception")
     await lock_branch(p, db)
     row = await scoped(Appointment, appointment_id, p, db, lock=True)
-    allowed = {"BOOKED": {"CHECKED_IN", "CANCELLED", "NO_SHOW"}, "CHECKED_IN": {"COMPLETED"}}
+    allowed = {"PENDING": {"BOOKED", "REJECTED", "CANCELLED"}, "BOOKED": {"CHECKED_IN", "CANCELLED", "NO_SHOW"}, "CHECKED_IN": {"COMPLETED"}}
     if body.status != row.status and body.status not in allowed.get(row.status, set()):
         raise HTTPException(409, "Invalid appointment transition")
     if body.status != row.status:
+        if body.status in {"BOOKED", "REJECTED"}:
+            if body.status == "REJECTED" and not body.reason.strip():
+                raise HTTPException(422, "A rejection reason is required")
+            schedule = await scoped(Schedule, row.schedule_id, p, db, lock=True)
+            ends_at = schedule.ends_at.replace(tzinfo=timezone.utc) if schedule.ends_at.tzinfo is None else schedule.ends_at
+            if body.status == "BOOKED" and ends_at <= datetime.now(timezone.utc):
+                raise HTTPException(409, "Cannot approve an ended session")
+            row.reviewed_at = datetime.now(timezone.utc)
+            row.reviewed_by = p.subject
+            row.review_reason = body.reason.strip()
         row.status = body.status
-        audit(db, p, "appointment.updated", row.id)
+        audit(db, p, f"appointment.{body.status.lower()}", row.id)
         await db.commit()
     return row
 

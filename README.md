@@ -1,5 +1,13 @@
 # MediQueue Backend
 
+Patient appointment requests enter `PENDING`. The branch-scoped
+`GET /v1/appointment-inbox` supports status/search filters, pagination and counts.
+Admin, staff and reception can approve, reject with a reason, record arrival or
+absence, complete and cancel through `PATCH /v1/appointments/{id}`. Decision
+metadata is stored and audited; patients see their updated status and rejection
+reason. Apply Alembic revision `0010_appointment_review` before deployment.
+Existing bookings retain `BOOKED`, shown as Approved; staff bookings remain approved.
+
 Patient discovery is available at `/v1/patient/centers`; branch admins configure
 public address, phone and paired latitude/longitude through the branch API.
 `/v1/patient/schedules/{branch_id}` includes remaining session capacity and the
