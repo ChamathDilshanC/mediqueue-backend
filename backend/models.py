@@ -102,6 +102,12 @@ class OutboxEvent(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0); available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+class StripeWebhookEvent(Base):
+    __tablename__ = "stripe_webhook_event"; __table_args__ = {"schema": "notifications"}
+    event_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(120))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
 
 class UserProfile(Base):
     __tablename__ = "user_profile"; __table_args__ = {"schema": "iam"}
@@ -217,6 +223,10 @@ class Appointment(Base):
     review_reason: Mapped[str] = mapped_column(String(500), default="", server_default="")
     reviewed_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quotation: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    payment_method: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    payment_status: Mapped[str] = mapped_column(String(20), default="UNPAID", server_default="UNPAID")
+    payment_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -270,4 +280,3 @@ class WardAdmission(Base):
     assigned_by: Mapped[str] = mapped_column(String(200), default="")
     discharged_by: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-

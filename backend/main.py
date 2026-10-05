@@ -17,6 +17,7 @@ from .management import router as management_router
 from .patient_portal import router as patient_router
 from .ward_map import router as ward_map_router
 from .patient_flow import router as patient_flow_router
+from .stripe_webhook import router as stripe_webhook_router
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -43,6 +44,10 @@ async def lifespan(app: FastAPI):
             await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS review_reason VARCHAR(500) NOT NULL DEFAULT ''"))
             await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(200)"))
             await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ"))
+            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS quotation JSONB NOT NULL DEFAULT '[]'::jsonb"))
+            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS payment_method VARCHAR(30)"))
+            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) NOT NULL DEFAULT 'UNPAID'"))
+            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS payment_reference VARCHAR(200)"))
             await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS address VARCHAR(500) NOT NULL DEFAULT ''"))
             await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS phone VARCHAR(40) NOT NULL DEFAULT ''"))
             await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION"))
@@ -455,4 +460,5 @@ app.include_router(management_router)
 app.include_router(patient_router)
 app.include_router(ward_map_router)
 app.include_router(patient_flow_router)
+app.include_router(stripe_webhook_router)
 app.mount("/assets", StaticFiles(directory=Path(__file__).parent / "static"), name="assets")

@@ -83,8 +83,15 @@ DATABASE_URL=postgresql://postgres.<project-ref>:PASSWORD@aws-0-<region>.pooler.
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<public-anon-key>
 SUPABASE_JWKS_URL=https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json
+STRIPE_SECRET_KEY=<server-only-stripe-secret-key>
+STRIPE_SUCCESS_URL=https://<frontend-origin>/patient?payment=success
+STRIPE_CANCEL_URL=https://<frontend-origin>/patient?payment=cancelled
 CONFIG_PATH=configuration/defaults.json
 ```
+
+Hospital staff can add appointment quotations from the appointment inbox. Patients
+can then choose Stripe Checkout or pay at the hospital from their appointment card.
+Keep `STRIPE_SECRET_KEY` server-side; online payment is unavailable until it is set.
 
 Use the Supabase Session Pooler on port `5432` for Vercel. Encode password
 characters (`@` → `%40`, `#` → `%23`, `%` → `%25`). Never commit `.env`,

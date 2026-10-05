@@ -368,6 +368,21 @@ async def update_appointment(appointment_id: uuid.UUID, body: AppointmentPatch, 
     require_role(p, "admin", "staff", "reception")
     await lock_branch(p, db)
     row = await scoped(Appointment, appointment_id, p, db, lock=True)
+    if body.quotation is not None:
+        if len(body.quotation) > 50:
+            raise HTTPException(422, "A quotation may contain at most 50 items")
+        quotation = []
+        for item in body.quotation:
+            if not isinstance(item.get("name"), str) or not item["name"].strip():
+                raise HTTPException(422, "Every quotation item needs a name")
+            try:
+                amount = float(item.get("amount", 0))
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(422, "Quotation amounts must be numbers") from exc
+            if amount < 0:
+                raise HTTPException(422, "Quotation amounts cannot be negative")
+            quotation.append({"name": item["name"].strip(), "amount": round(amount, 2)})
+        row.quotation = quotation
     allowed = {"PENDING": {"BOOKED", "REJECTED", "CANCELLED"}, "BOOKED": {"CHECKED_IN", "CANCELLED", "NO_SHOW"}, "CHECKED_IN": {"COMPLETED"}}
     if body.status != row.status and body.status not in allowed.get(row.status, set()):
         raise HTTPException(409, "Invalid appointment transition")
@@ -384,6 +399,8 @@ async def update_appointment(appointment_id: uuid.UUID, body: AppointmentPatch, 
             row.review_reason = body.reason.strip()
         row.status = body.status
         audit(db, p, f"appointment.{body.status.lower()}", row.id)
+        await db.commit()
+    elif body.quotation is not None:
         await db.commit()
     return row
 

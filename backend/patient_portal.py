@@ -1,5 +1,8 @@
 """Patient self service using verified identity ownership, independent of staff roles."""
 import uuid
+import asyncio
+from decimal import Decimal
+import stripe
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import Field
 from sqlalchemy import select, func
@@ -12,6 +15,7 @@ from .schemas import AppointmentInput, AppointmentPatch
 from .management import Input, output
 from .models import Appointment, Bed, Branch, Doctor, ManagementRecord, Patient, PatientAccount, Schedule, Tenant, Ward, WardAdmission
 from .ward_map import stay_summary
+from .settings import get_settings
 
 router = APIRouter(prefix="/v1/patient", tags=["Patient portal"])
 DEPENDENCIES[Patient].append((PatientAccount, PatientAccount.patient_id))
@@ -73,7 +77,10 @@ async def overview(identity: Identity = Depends(current_identity), db: AsyncSess
                              .where(WardAdmission.patient_id.in_(ids)).order_by(WardAdmission.admitted_at.desc()))).all() if ids else []
     return {"profiles": [{"id": str(p.id), "name": p.first_name or p.external_ref, "mrn": p.mrn, "tenant_id": str(p.tenant_id)} for p in profiles],
             "ward_stays": [{**stay_summary(a, b.timezone), "ward": w.name, "bed": bed.bed_number if bed else None, "timezone": b.timezone} for a, w, bed, b in stays],
-            "appointments": [{"id": str(a.id), "schedule_id": str(s.id), "status": a.status, "review_reason": a.review_reason, "reviewed_at": a.reviewed_at, "doctor": d.name,
+            "appointments": [{"id": str(a.id), "schedule_id": str(s.id), "status": a.status, "review_reason": a.review_reason, "reviewed_at": a.reviewed_at,
+                "quotation": a.quotation or [], "payment_method": a.payment_method, "payment_status": a.payment_status,
+                "payment_reference": a.payment_reference, "quotation_total": str(sum(Decimal(str(i.get("amount", 0))) for i in (a.quotation or []))),
+                "doctor": d.name,
                 "starts_at": s.starts_at, "ends_at": s.ends_at, "center": f"{t.name} · {b.name}", "timezone": b.timezone,
                 "address": b.address, "latitude": b.latitude, "longitude": b.longitude} for a, s, d, b, t in bookings],
             "records": [{**output(r), "module": r.module} for r in visible]}
@@ -108,6 +115,9 @@ async def schedules(branch_id: uuid.UUID, identity: Identity = Depends(current_i
 class Booking(Input):
     schedule_id: uuid.UUID
 
+class PaymentChoice(Input):
+    method: str = Field(pattern="^(ONLINE|PAY_AT_HOSPITAL)$")
+
 @router.post("/appointments", status_code=201)
 async def book(body: Booking, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
     schedule = await db.get(Schedule, body.schedule_id)
@@ -130,3 +140,55 @@ async def cancel(appointment_id: uuid.UUID, identity: Identity = Depends(current
     principal = Principal(identity.subject, str(row.tenant_id), str(row.branch_id), ("reception",))
     result = await update_appointment(row.id, AppointmentPatch(status="CANCELLED"), principal, db)
     return {"id": str(result.id), "status": result.status}
+
+@router.post("/appointments/{appointment_id}/payment")
+async def appointment_payment(appointment_id: uuid.UUID, body: PaymentChoice,
+                              identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
+    row = await db.get(Appointment, appointment_id)
+    if not row:
+        raise HTTPException(404, "Appointment not found")
+    link = await account(identity, db, row.tenant_id)
+    if link.patient_id != row.patient_id:
+        raise HTTPException(404, "Appointment not found")
+    if row.status not in {"BOOKED", "CHECKED_IN"}:
+        raise HTTPException(409, "Payment is available after the appointment is approved")
+    total = sum(Decimal(str(item.get("amount", 0))) for item in (row.quotation or []))
+    if total <= 0:
+        raise HTTPException(409, "The hospital has not added a quotation yet")
+    if row.payment_status == "PAID":
+        return {"status": "PAID", "checkout_url": None}
+    if body.method == "PAY_AT_HOSPITAL":
+        row.payment_method = body.method
+        row.payment_status = "PAY_AT_HOSPITAL"
+        await db.commit()
+        return {"status": row.payment_status, "checkout_url": None}
+    settings = get_settings()
+    if not settings.stripe_secret_key:
+        raise HTTPException(503, "Online payments are not configured by this hospital")
+    stripe.api_key = settings.stripe_secret_key
+    try:
+        checkout = await asyncio.to_thread(
+            stripe.checkout.Session.create,
+            mode="payment",
+            success_url=settings.stripe_success_url,
+            cancel_url=settings.stripe_cancel_url,
+            client_reference_id=str(row.id),
+            line_items=[{
+                "price_data": {
+                    "currency": "lkr",
+                    "product_data": {"name": "MediQueue appointment quotation"},
+                    "unit_amount": int(total * 100),
+                },
+                "quantity": 1,
+            }],
+        )
+    except stripe.error.StripeError as exc:
+        raise HTTPException(502, "Stripe could not create the payment session") from exc
+    checkout_url = getattr(checkout, "url", None)
+    if not checkout_url:
+        raise HTTPException(502, "Stripe returned an invalid payment session")
+    row.payment_method = "ONLINE"
+    row.payment_status = "CHECKOUT_STARTED"
+    row.payment_reference = getattr(checkout, "id", None)
+    await db.commit()
+    return {"status": row.payment_status, "checkout_url": checkout_url}

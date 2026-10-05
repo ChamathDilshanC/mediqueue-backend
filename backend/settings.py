@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     dev_tenant_id: str = "00000000-0000-0000-0000-000000000001"
     dev_branch_id: str = "00000000-0000-0000-0000-000000000002"
     config_path: str = "configuration/defaults.json"
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    stripe_success_url: str = "http://localhost:3000/patient?payment=success"
+    stripe_cancel_url: str = "http://localhost:3000/patient?payment=cancelled"
 
     @field_validator("database_url")
     @classmethod

@@ -41,7 +41,7 @@ def ensure_sqlite_discovery_columns(connection):
     if connection.dialect.name != "sqlite":
         return
     additions = {
-        ("scheduling", "appointment"): {"source": "VARCHAR(20) NOT NULL DEFAULT 'STAFF'", "review_reason": "VARCHAR(500) NOT NULL DEFAULT ''", "reviewed_by": "VARCHAR(200)", "reviewed_at": "DATETIME"},
+        ("scheduling", "appointment"): {"source": "VARCHAR(20) NOT NULL DEFAULT 'STAFF'", "review_reason": "VARCHAR(500) NOT NULL DEFAULT ''", "reviewed_by": "VARCHAR(200)", "reviewed_at": "DATETIME", "quotation": "TEXT NOT NULL DEFAULT '[]'", "payment_method": "VARCHAR(30)", "payment_status": "VARCHAR(20) NOT NULL DEFAULT 'UNPAID'", "payment_reference": "VARCHAR(200)"},
         ("iam", "branch"): {"address": "VARCHAR(500) NOT NULL DEFAULT ''", "phone": "VARCHAR(40) NOT NULL DEFAULT ''", "latitude": "FLOAT", "longitude": "FLOAT"},
         ("queue", "queue"): {"average_service_minutes": "INTEGER NOT NULL DEFAULT 5"},
     }
@@ -53,6 +53,11 @@ def ensure_sqlite_discovery_columns(connection):
         for name, sql_type in columns.items():
             if name not in existing:
                 connection.execute(text(f'ALTER TABLE {schema}."{table}" ADD COLUMN {name} {sql_type}'))
+    connection.execute(text(
+        'CREATE TABLE IF NOT EXISTS notifications."stripe_webhook_event" '
+        '(event_id VARCHAR(255) PRIMARY KEY, event_type VARCHAR(120) NOT NULL, '
+        'received_at DATETIME DEFAULT CURRENT_TIMESTAMP)'
+    ))
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Yield an async transaction session for a request."""

@@ -330,6 +330,7 @@ class AppointmentInput(VisitInput):
 class AppointmentPatch(Input):
     status: Literal["BOOKED", "REJECTED", "CHECKED_IN", "CANCELLED", "COMPLETED", "NO_SHOW"]
     reason: str = Field(default="", max_length=500)
+    quotation: list[dict] | None = None
 
 
 class AppointmentOutput(VisitOutput):
@@ -337,6 +338,10 @@ class AppointmentOutput(VisitOutput):
     review_reason: str = ""
     reviewed_by: str | None = None
     reviewed_at: datetime | None = None
+    quotation: list[dict] = []
+    payment_method: str | None = None
+    payment_status: str = "UNPAID"
+    payment_reference: str | None = None
     schedule_id: uuid.UUID
     status: str
     created_at: datetime
@@ -445,4 +450,3 @@ class WardAdmissionOutput(Output):
     assigned_by: str = ""
     discharged_by: str = ""
     created_at: datetime
-
