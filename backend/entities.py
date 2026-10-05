@@ -44,6 +44,11 @@ async def lock_branch(p, db):
 
 
 async def validate_entity(model, data, p, db, item_id=None):
+    if model is Queue:
+        if data.get("room_id"):
+            await scoped(Room, data["room_id"], p, db)
+        if data.get("service_type") == "CONSULTATION" and not data.get("room_id"):
+            raise HTTPException(422, "Consultation queues require a doctor room")
     if model is Room and data.get("department_id"):
         await scoped(Department, data["department_id"], p, db)
     elif model is Queue and data.get("department_id"):

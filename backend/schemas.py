@@ -279,10 +279,14 @@ class RoomOutput(ScopedOutput):
 class QueueInput(Input):
     name: str = Field(min_length=1, max_length=120)
     department_id: uuid.UUID | None = None
+    service_type: Literal["GENERAL", "REGISTRATION", "CONSULTATION", "DISPENSARY"] = "GENERAL"
+    room_id: uuid.UUID | None = None
 
 
 class QueueOutput(ScopedOutput):
     department_id: uuid.UUID | None = None
+    service_type: str
+    room_id: uuid.UUID | None = None
     timezone: str
     token_sequence: int
 

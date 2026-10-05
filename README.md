@@ -159,3 +159,14 @@ Admissions support `admitted_at` and nullable `planned_discharge_at`; allocation
 timestamps are maintained by bed assignment. Day counts include admission day as
 day 1 in the branch timezone and stop at actual discharge. Patient overview returns
 only owned ward stays. Database errors use sanitized JSON 503 responses.
+
+## Patient journey queues
+
+Apply `alembic upgrade head` through `0008_patient_flow`. Configure queue
+`service_type` as REGISTRATION, CONSULTATION or DISPENSARY (existing queues stay
+GENERAL); consultation queues require `room_id`. Patients fetch owned tickets with
+`GET /v1/patient/tickets` and take registration tickets via
+`POST /v1/patient/queues/{id}/tickets` using an Idempotency-Key. Staff complete the
+current station and call `POST /v1/journey/tokens/{id}/handoff` with `queue_id` and an
+Idempotency-Key to issue the next ticket in the same visit. Reception can operate
+and route registration tickets; patients cannot invoke staff commands.

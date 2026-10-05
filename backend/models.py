@@ -31,6 +31,8 @@ class Queue(Base):
     name: Mapped[str] = mapped_column(String(120))
     timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
     token_sequence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    service_type: Mapped[str] = mapped_column(String(30), default="GENERAL", nullable=False)
+    room_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.room.id"), nullable=True)
 
 class Patient(Base):
     __tablename__ = "patient"; __table_args__ = {"schema": "queue"}

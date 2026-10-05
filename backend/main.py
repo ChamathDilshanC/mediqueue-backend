@@ -16,6 +16,7 @@ from .portal import router as portal_router
 from .management import router as management_router
 from .patient_portal import router as patient_router
 from .ward_map import router as ward_map_router
+from .patient_flow import router as patient_flow_router
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -110,6 +111,8 @@ async def lifespan(app: FastAPI):
             connection = await session.connection()
             await connection.run_sync(lambda sync: ManagementRecord.__table__.create(sync, checkfirst=True))
             await connection.run_sync(lambda sync: PatientAccount.__table__.create(sync, checkfirst=True))
+            await session.execute(text("ALTER TABLE queue.queue ADD COLUMN IF NOT EXISTS service_type VARCHAR(30) NOT NULL DEFAULT 'GENERAL'"))
+            await session.execute(text("ALTER TABLE queue.queue ADD COLUMN IF NOT EXISTS room_id UUID REFERENCES scheduling.room(id)"))
             await session.commit()
             break
     except Exception as exc:
@@ -332,10 +335,12 @@ async def check_in(queue_id: uuid.UUID, body: CheckIn, idempotency_key: str = He
     description="Selects one eligible waiting token under a database row lock and records audit/outbox events.",
 )
 async def call_next(queue_id: uuid.UUID, idempotency_key: str = Header(..., min_length=1, max_length=200), p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)) -> dict:
-    if not any(role in p.roles for role in ("staff", "doctor", "admin")):
+    if not any(role in p.roles for role in ("staff", "doctor", "admin", "reception")):
         raise HTTPException(403, "Role denied")
     await lock_branch(p, db)
     q = await scoped_queue(queue_id, p, db)
+    if set(p.roles) == {"reception"} and q.service_type != "REGISTRATION":
+        raise HTTPException(403, "Reception operates registration queues only")
     await db.scalar(select(Queue).where(Queue.id == q.id).with_for_update())
     key, fingerprint = command_key(p, f"call-next:{q.id}", idempotency_key, {})
     previous = await replay(db, q.tenant_id, key, fingerprint)
@@ -361,13 +366,17 @@ async def call_next(queue_id: uuid.UUID, idempotency_key: str = Header(..., min_
     description="Supported actions are `recall`, `skip`, `start`, `complete`, and `cancel`. State changes are audited and published to the outbox.",
 )
 async def transition(token_id: uuid.UUID, action: Literal["recall", "skip", "start", "complete", "cancel"], body: Transition = Transition(), idempotency_key: str | None = Header(None, min_length=1, max_length=200), p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)) -> dict:
-    if not any(role in p.roles for role in ("staff", "doctor", "admin")):
+    if not any(role in p.roles for role in ("staff", "doctor", "admin", "reception")):
         raise HTTPException(403, "Role denied")
     await lock_branch(p, db)
     token = await db.scalar(select(QueueToken).where(QueueToken.id == token_id).with_for_update())
     if not token:
         raise HTTPException(404, "Token not found")
     require_scope(p, str(token.tenant_id), str(token.branch_id))
+    if set(p.roles) == {"reception"}:
+        q = await scoped_queue(token.queue_id, p, db)
+        if q.service_type != "REGISTRATION":
+            raise HTTPException(403, "Reception operates registration queues only")
     if idempotency_key:
         key, fingerprint = command_key(p, f"{action}:{token_id}", idempotency_key, body.model_dump())
         previous = await replay(db, token.tenant_id, key, fingerprint)
@@ -431,4 +440,5 @@ app.include_router(portal_router)
 app.include_router(management_router)
 app.include_router(patient_router)
 app.include_router(ward_map_router)
+app.include_router(patient_flow_router)
 app.mount("/assets", StaticFiles(directory=Path(__file__).parent / "static"), name="assets")
