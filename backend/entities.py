@@ -148,8 +148,21 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
         require_role(p, *write_roles)
         await lock_branch(p, db)
         data = body.model_dump()
+        bed_setup = {}
+        if model is Ward:
+            bed_setup = {key: data.pop(key) for key in ("initial_bed_count", "initial_bed_type", "bed_number_prefix", "bed_start_number")}
         if model is WardAdmission and "planned_discharge_at" not in body.model_fields_set:
             data.pop("planned_discharge_at", None)
+        if model is Ward:
+            department_data = data.pop("new_department")
+            if department_data:
+                if not department_data["code"]:
+                    department_data["code"] = f"D-{uuid.uuid4().hex[:12]}"
+                department = Department(**department_data, tenant_id=uuid.UUID(p.tenant_id), branch_id=uuid.UUID(p.branch_id))
+                db.add(department)
+                await db.flush()
+                data["department_id"] = department.id
+                audit(db, p, "departments.created", department.id)
         await validate_entity(model, data, p, db)
         if model is Visit:
             await scoped(Patient, data["patient_id"], p, db)
@@ -177,6 +190,14 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
             (await scoped(Bed, item.bed_id, p, db)).status = "OCCUPIED"
         db.add(item)
         await db.flush()
+        if model is Ward:
+            for index in range(bed_setup["initial_bed_count"]):
+                bed = Bed(tenant_id=item.tenant_id, branch_id=item.branch_id, ward_id=item.id,
+                    bed_number=f'{bed_setup["bed_number_prefix"]}{bed_setup["bed_start_number"] + index:03d}',
+                    bed_type=bed_setup["initial_bed_type"], status="AVAILABLE", is_active=True)
+                db.add(bed)
+                await db.flush()
+                audit(db, p, "beds.created", bed.id)
         audit(db, p, f"{path}.created", item.id)
         await db.commit()
         return item
@@ -188,8 +209,14 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
             await db.scalar(select(Tenant).where(Tenant.id == uuid.UUID(p.tenant_id)).with_for_update())
         item = await scoped(model, item_id, p, db, lock=True)
         data = body.model_dump()
+        bed_setup = {}
+        if model is Ward:
+            bed_setup = {key: data.pop(key) for key in ("initial_bed_count", "initial_bed_type", "bed_number_prefix", "bed_start_number")}
         if model is WardAdmission and "planned_discharge_at" not in body.model_fields_set:
             data.pop("planned_discharge_at", None)
+        if model is Ward:
+            if data.pop("new_department") or bed_setup["initial_bed_count"]:
+                raise HTTPException(422, "Related setup is only supported when creating a ward")
         await validate_entity(model, data, p, db, item_id)
         if model is WardAdmission:
             if item.admission_status != "ADMITTED":

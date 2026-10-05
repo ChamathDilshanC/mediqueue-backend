@@ -91,3 +91,25 @@ async def test_missing_portal_schema_returns_safe_service_error(api):
     assert response.status_code == 503
     assert "temporarily unavailable" in response.json()["detail"]
     assert "SELECT" not in response.text and "patient_account" not in response.text
+
+
+async def test_ward_setup_creates_department_and_numbered_beds(api):
+    client, _ = api
+    _, headers, _ = await onboard(client)
+    ward = await create(client, "wards", headers, {
+        "name": "Integrated ward", "new_department": {"name": "Medical"},
+        "bed_capacity": 3, "initial_bed_count": 3,
+        "initial_bed_type": "ICU", "bed_number_prefix": "ICU-", "bed_start_number": 5})
+    response = await client.get(f'/v1/wards/{ward["id"]}/bed-map', headers=headers)
+    assert response.status_code == 200
+    beds = response.json()["beds"]
+    assert {bed["number"] for bed in beds} == {"ICU-005", "ICU-006", "ICU-007"}
+    assert all(bed["type"] == "ICU" and bed["status"] == "AVAILABLE" for bed in beds)
+    departments = (await client.get("/v1/departments", headers=headers)).json()
+    assert any(department["id"] == ward["department_id"] for department in departments)
+    response = await client.post("/v1/wards", headers=headers, json={
+        "name": "Too many", "new_department": {"name": "Should not save"},
+        "bed_capacity": 1, "initial_bed_count": 2})
+    assert response.status_code == 422
+    departments = (await client.get("/v1/departments", headers=headers)).json()
+    assert not any(department["name"] == "Should not save" for department in departments)

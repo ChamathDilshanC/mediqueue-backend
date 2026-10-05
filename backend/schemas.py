@@ -327,7 +327,21 @@ class AuditOutput(Output):
 
 
 class WardInput(Input):
-    department_id: uuid.UUID
+    new_department: DepartmentInput | None = None
+    initial_bed_count: int = Field(default=0, ge=0, le=1000)
+    initial_bed_type: Literal["STANDARD", "ICU", "ISOLATION", "PEDIATRIC", "MATERNITY"] = "STANDARD"
+    bed_number_prefix: str = Field(default="BED-", max_length=30)
+    bed_start_number: int = Field(default=1, ge=1, le=999999)
+
+    @model_validator(mode="after")
+    def validate_initial_beds(self):
+        if bool(self.department_id) == bool(self.new_department):
+            raise ValueError("Select an existing department or provide a new department")
+        if self.initial_bed_count > self.bed_capacity:
+            raise ValueError("Initial beds cannot exceed ward capacity")
+        return self
+
+    department_id: uuid.UUID | None = None
     ward_code: str = Field(default="", max_length=50)
     name: Name
     ward_type: str = Field(default="General", max_length=50)
