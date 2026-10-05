@@ -192,8 +192,8 @@ async def appointment_payment(appointment_id: uuid.UUID, body: PaymentChoice,
     link = await account(identity, db, row.tenant_id)
     if link.patient_id != row.patient_id:
         raise HTTPException(404, "Appointment not found")
-    if row.status not in {"BOOKED", "CHECKED_IN"}:
-        raise HTTPException(409, "Payment is available after the appointment is approved")
+    if row.status not in {"PENDING", "BOOKED", "CHECKED_IN"}:
+        raise HTTPException(409, "Payment is not available for this appointment")
     total = sum(Decimal(str(item.get("amount", 0))) for item in (row.quotation or []))
     if total <= 0:
         raise HTTPException(409, "The hospital has not added a quotation yet")
