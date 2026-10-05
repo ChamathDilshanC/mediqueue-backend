@@ -9,12 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Principal, current_principal, require_role
 from .db import get_session
 from .identity import audit
-from .models import (Appointment, AuditEvent, Bed, Branch, Department, Doctor, Patient,
-                     Queue, QueueToken, Room, Schedule, Tenant, Visit, Ward, WardAdmission)
+from .models import (Appointment, AuditEvent, Attendant, Bed, Branch, Department, Doctor, Nurse,
+                     Patient, Queue, QueueToken, Room, Schedule, StaffAttendance, StaffShift,
+                     Tenant, Visit, Ward, WardAdmission, WardTask)
 from .schemas import (ERROR_RESPONSES, AppointmentInput, AppointmentOutput, AppointmentPatch, AuditOutput,
     BedInput, BedOutput, DepartmentInput, DepartmentOutput, DoctorInput, DoctorOutput, HospitalInput, PatientInput, PatientOutput, QueueInput,
     QueueOutput, RoomInput, RoomOutput, ScheduleInput, ScheduleOutput, ScopedOutput, VisitInput, VisitOutput,
-    WardInput, WardOutput, WardAdmissionInput, WardAdmissionOutput)
+    WardInput, WardOutput, WardAdmissionInput,     WardAdmissionOutput, StaffInput, NurseOutput, AttendantOutput, StaffShiftInput,
+    StaffShiftOutput, AttendanceInput, AttendanceOutput, WardTaskInput, WardTaskOutput)
 
 router = APIRouter(prefix="/v1", responses=ERROR_RESPONSES)
 READ_ROLES = ("admin", "staff", "reception", "doctor")
@@ -128,6 +130,32 @@ async def validate_entity(model, data, p, db, item_id=None):
                 raise HTTPException(409, "Schedules with appointment history cannot be edited")
         if await db.scalar(overlap):
             raise HTTPException(409, "Doctor or room already has an overlapping schedule")
+    elif model in (StaffShift,):
+        if data.get("doctor_id"):
+            await scoped(Doctor, data["doctor_id"], p, db)
+        if data.get("nurse_id"):
+            await scoped(Nurse, data["nurse_id"], p, db)
+        if data.get("attendant_id"):
+            await scoped(Attendant, data["attendant_id"], p, db)
+    elif model is StaffAttendance:
+        shift = await scoped(StaffShift, data["shift_id"], p, db)
+        if item_id:
+            duplicate = None
+        else:
+            duplicate = await db.scalar(select(StaffAttendance.id).where(
+                *scope(StaffAttendance, p), StaffAttendance.shift_id == shift.id))
+        if duplicate:
+            raise HTTPException(409, "Attendance is already recorded for this shift")
+    elif model is WardTask:
+        await scoped(Ward, data["ward_id"], p, db)
+        if data.get("patient_id"):
+            await scoped(Patient, data["patient_id"], p, db)
+        if data.get("doctor_id"):
+            await scoped(Doctor, data["doctor_id"], p, db)
+        if data.get("nurse_id"):
+            await scoped(Nurse, data["nurse_id"], p, db)
+        if data.get("attendant_id"):
+            await scoped(Attendant, data["attendant_id"], p, db)
     elif model is Patient:
         # Patients are shared inside a hospital; serialize registrations across branches.
         await db.scalar(select(Tenant).where(Tenant.id == uuid.UUID(p.tenant_id)).with_for_update())
@@ -175,12 +203,16 @@ async def discharge_admission(item_id: uuid.UUID, p: Principal = Depends(current
 DEPENDENCIES = {
     Department: [(Doctor, Doctor.department_id), (Room, Room.department_id), (Ward, Ward.department_id)],
     Room: [(Schedule, Schedule.room_id)],
-    Doctor: [(Schedule, Schedule.doctor_id)],
+    Doctor: [(Schedule, Schedule.doctor_id), (StaffShift, StaffShift.doctor_id), (WardTask, WardTask.doctor_id)],
     Ward: [(Bed, Bed.ward_id), (WardAdmission, WardAdmission.ward_id)],
     Bed: [(WardAdmission, WardAdmission.bed_id)],
     Schedule: [(Appointment, Appointment.schedule_id)],
-    Patient: [(Visit, Visit.patient_id), (Appointment, Appointment.patient_id), (WardAdmission, WardAdmission.patient_id)],
     Queue: [(QueueToken, QueueToken.queue_id)],
+    Nurse: [(StaffShift, StaffShift.nurse_id), (WardTask, WardTask.nurse_id)],
+    Attendant: [(StaffShift, StaffShift.attendant_id), (WardTask, WardTask.attendant_id)],
+    StaffShift: [(StaffAttendance, StaffAttendance.shift_id)],
+    Ward: [(WardTask, WardTask.ward_id)],
+    Patient: [(Visit, Visit.patient_id), (Appointment, Appointment.patient_id), (WardAdmission, WardAdmission.patient_id), (WardTask, WardTask.patient_id)],
 }
 
 
@@ -330,6 +362,40 @@ resource_routes("schedules", Schedule, ScheduleInput, ScheduleOutput)
 resource_routes("patients", Patient, PatientInput, PatientOutput, ("admin", "staff", "reception"))
 resource_routes("queues", Queue, QueueInput, QueueOutput)
 resource_routes("visits", Visit, VisitInput, VisitOutput, ("admin", "staff", "reception"), deletable=False)
+resource_routes("nurses", Nurse, StaffInput, NurseOutput, ("admin", "staff"))
+resource_routes("attendants", Attendant, StaffInput, AttendantOutput, ("admin", "staff"))
+resource_routes("staff-shifts", StaffShift, StaffShiftInput, StaffShiftOutput, ("admin", "staff"))
+resource_routes("staff-attendance", StaffAttendance, AttendanceInput, AttendanceOutput, ("admin", "staff"))
+resource_routes("ward-tasks", WardTask, WardTaskInput, WardTaskOutput, ("admin", "staff"))
+
+
+@router.post("/ward-tasks/{item_id}/verify", response_model=WardTaskOutput, tags=["Ward Tasks"])
+async def verify_ward_task(item_id: uuid.UUID, p: Principal = Depends(current_principal),
+                            db: AsyncSession = Depends(get_session)):
+    require_role(p, "admin", "staff")
+    await lock_branch(p, db)
+    task = await scoped(WardTask, item_id, p, db, lock=True)
+    if task.status in ("CANCELLED", "ASSIGNED"):
+        raise HTTPException(409, "Only completed tasks can be verified")
+    task.status = "VERIFIED"
+    task.verified_by = p.subject
+    task.verified_at = datetime.now(timezone.utc)
+    audit(db, p, "ward-tasks.verified", task.id)
+    await db.commit()
+    return task
+
+
+@router.post("/staff-attendance/{item_id}/verify", response_model=AttendanceOutput, tags=["Staff Attendance"])
+async def verify_staff_attendance(item_id: uuid.UUID, p: Principal = Depends(current_principal),
+                                  db: AsyncSession = Depends(get_session)):
+    require_role(p, "admin", "staff")
+    await lock_branch(p, db)
+    attendance = await scoped(StaffAttendance, item_id, p, db, lock=True)
+    attendance.verified_by = p.subject
+    attendance.verified_at = datetime.now(timezone.utc)
+    audit(db, p, "staff-attendance.verified", attendance.id)
+    await db.commit()
+    return attendance
 
 
 @router.get("/appointment-inbox", tags=["Appointments"])

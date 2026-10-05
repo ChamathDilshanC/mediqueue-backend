@@ -1,7 +1,7 @@
 """Queue domain tables and constraints owned by the backend service."""
 import uuid
 from datetime import datetime, date
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -283,3 +283,80 @@ class WardAdmission(Base):
     assigned_by: Mapped[str] = mapped_column(String(200), default="")
     discharged_by: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Nurse(Base):
+    __tablename__ = "nurse"; __table_args__ = {"schema": "scheduling"}
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    employee_id: Mapped[str] = mapped_column(String(50))
+    name: Mapped[str] = mapped_column(String(200))
+    phone: Mapped[str] = mapped_column(String(40), default="")
+    status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
+
+
+class Attendant(Base):
+    __tablename__ = "attendant"; __table_args__ = {"schema": "scheduling"}
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    employee_id: Mapped[str] = mapped_column(String(50))
+    name: Mapped[str] = mapped_column(String(200))
+    phone: Mapped[str] = mapped_column(String(40), default="")
+    status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
+
+
+class StaffShift(Base):
+    __tablename__ = "staff_shift"; __table_args__ = (
+        CheckConstraint("(doctor_id IS NOT NULL) + (nurse_id IS NOT NULL) + (attendant_id IS NOT NULL) = 1", name="ck_staff_shift_one_assignee"),
+        {"schema": "scheduling"},
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    doctor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.doctor.id"), nullable=True)
+    nurse_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.nurse.id"), nullable=True)
+    attendant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.attendant.id"), nullable=True)
+    shift_date: Mapped[date] = mapped_column(Date)
+    shift: Mapped[str] = mapped_column(String(20))
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="SCHEDULED")
+    notes: Mapped[str] = mapped_column(String(500), default="")
+
+
+class StaffAttendance(Base):
+    __tablename__ = "staff_attendance"; __table_args__ = {"schema": "scheduling"}
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    shift_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.staff_shift.id"))
+    attendance_status: Mapped[str] = mapped_column(String(20), default="PRESENT")
+    check_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    check_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str] = mapped_column(String(500), default="")
+    verified_by: Mapped[str] = mapped_column(String(200), default="")
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WardTask(Base):
+    __tablename__ = "ward_task"; __table_args__ = (
+        CheckConstraint("(doctor_id IS NOT NULL) + (nurse_id IS NOT NULL) + (attendant_id IS NOT NULL) = 1", name="ck_ward_task_one_assignee"),
+        {"schema": "scheduling"},
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    ward_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.ward.id"))
+    patient_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("queue.patient.id"), nullable=True)
+    doctor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.doctor.id"), nullable=True)
+    nurse_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.nurse.id"), nullable=True)
+    attendant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.attendant.id"), nullable=True)
+    task_type: Mapped[str] = mapped_column(String(30))
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="ASSIGNED")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_by: Mapped[str] = mapped_column(String(200), default="")
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

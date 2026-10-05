@@ -1,7 +1,7 @@
 """Strict input contracts shared by the identity and entity APIs."""
 import uuid
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -475,3 +475,109 @@ class WardAdmissionOutput(Output):
     assigned_by: str = ""
     discharged_by: str = ""
     created_at: datetime
+
+
+class StaffInput(Input):
+    employee_id: str = Field(min_length=1, max_length=50)
+    name: Name
+    phone: str = Field(default="", max_length=40)
+    status: Literal["ACTIVE", "INACTIVE"] = "ACTIVE"
+
+
+class NurseOutput(ScopedOutput):
+    employee_id: str
+    name: str
+    phone: str = ""
+    status: str = "ACTIVE"
+
+
+class AttendantOutput(NurseOutput):
+    pass
+
+
+class StaffShiftInput(Input):
+    doctor_id: uuid.UUID | None = None
+    nurse_id: uuid.UUID | None = None
+    attendant_id: uuid.UUID | None = None
+    shift_date: date
+    shift: Literal["MORNING", "AFTERNOON", "EVENING", "NIGHT"]
+    starts_at: AwareDatetime
+    ends_at: AwareDatetime
+    status: Literal["SCHEDULED", "CANCELLED", "COMPLETED"] = "SCHEDULED"
+    notes: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def one_staff(self):
+        if sum(value is not None for value in (self.doctor_id, self.nurse_id, self.attendant_id)) != 1:
+            raise ValueError("Assign exactly one doctor, nurse or attendant")
+        if self.ends_at <= self.starts_at:
+            raise ValueError("ends_at must be after starts_at")
+        return self
+
+
+class StaffShiftOutput(ScopedOutput):
+    doctor_id: uuid.UUID | None = None
+    nurse_id: uuid.UUID | None = None
+    attendant_id: uuid.UUID | None = None
+    shift_date: date
+    shift: str
+    starts_at: datetime
+    ends_at: datetime
+    status: str
+    notes: str = ""
+
+
+class AttendanceInput(Input):
+    shift_id: uuid.UUID
+    attendance_status: Literal["PRESENT", "ABSENT", "LATE", "LEAVE"] = "PRESENT"
+    check_in_at: AwareDatetime | None = None
+    check_out_at: AwareDatetime | None = None
+    notes: str = Field(default="", max_length=500)
+
+
+class AttendanceOutput(ScopedOutput):
+    shift_id: uuid.UUID
+    attendance_status: str
+    check_in_at: datetime | None = None
+    check_out_at: datetime | None = None
+    notes: str = ""
+    verified_by: str = ""
+    verified_at: datetime | None = None
+
+
+class WardTaskInput(Input):
+    ward_id: uuid.UUID
+    patient_id: uuid.UUID | None = None
+    doctor_id: uuid.UUID | None = None
+    nurse_id: uuid.UUID | None = None
+    attendant_id: uuid.UUID | None = None
+    task_type: Literal["WARD_WALK", "PATIENT_CHECK", "CLEANING"]
+    scheduled_at: AwareDatetime
+    status: Literal["ASSIGNED", "IN_PROGRESS", "COMPLETED", "VERIFIED", "CANCELLED"] = "ASSIGNED"
+    notes: str = Field(default="", max_length=2000)
+    completed_at: AwareDatetime | None = None
+    verified_by: str = Field(default="", max_length=200)
+    verified_at: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def one_assignee(self):
+        if sum(value is not None for value in (self.doctor_id, self.nurse_id, self.attendant_id)) != 1:
+            raise ValueError("Assign exactly one doctor, nurse or attendant")
+        if self.task_type == "PATIENT_CHECK" and self.patient_id is None:
+            raise ValueError("Patient checks require a patient")
+        return self
+
+
+class WardTaskOutput(ScopedOutput):
+    ward_id: uuid.UUID
+    patient_id: uuid.UUID | None = None
+    doctor_id: uuid.UUID | None = None
+    nurse_id: uuid.UUID | None = None
+    attendant_id: uuid.UUID | None = None
+    task_type: str
+    scheduled_at: datetime
+    status: str
+    notes: str = ""
+    completed_at: datetime | None = None
+    verified_by: str = ""
+    verified_at: datetime | None = None
