@@ -143,7 +143,8 @@ async def register_hospital(body: HospitalRegister, identity: Identity = Depends
     tenant = Tenant(name=body.name)
     db.add(tenant)
     await db.flush()
-    branch = Branch(tenant_id=tenant.id, name=body.branch_name, timezone=body.timezone)
+    branch = Branch(tenant_id=tenant.id, name=body.branch_name, timezone=body.timezone,
+        address=body.address, phone=body.phone, latitude=body.latitude, longitude=body.longitude)
     db.add(branch)
     await db.flush()
     membership = Membership(user_id=profile.id, tenant_id=tenant.id, branch_id=branch.id, role="admin")
@@ -198,7 +199,7 @@ async def admin_update_application(application_id: uuid.UUID, body: AdminApplica
         tenant = Tenant(name=app.official_name)
         db.add(tenant)
         await db.flush()
-        branch = Branch(tenant_id=tenant.id, name="Main branch", timezone="Asia/Colombo")
+        branch = Branch(tenant_id=tenant.id, name="Main branch", timezone="Asia/Colombo", address=app.address, phone=app.phone)
         db.add(branch)
         await db.flush()
         membership = Membership(user_id=app.applicant_id, tenant_id=tenant.id, branch_id=branch.id, role="admin")
@@ -322,7 +323,7 @@ async def create_branch(
     if not mem:
         raise HTTPException(403, "Must be an admin of this hospital to create a branch")
     
-    branch = Branch(tenant_id=tenant_id, name=body.name, timezone=body.timezone)
+    branch = Branch(tenant_id=tenant_id, **body.model_dump(exclude={"tenant_id"}))
     db.add(branch)
     await db.flush()
     db.add(Membership(user_id=uuid.UUID(identity.subject), tenant_id=branch.tenant_id, branch_id=branch.id, role="admin"))
@@ -355,6 +356,9 @@ async def edit_branch(branch_id: uuid.UUID, body: BranchInput, identity: Identit
     if not mem:
         raise HTTPException(403, "Must be an admin of this hospital")
     branch.name, branch.timezone = body.name, body.timezone
+    for key in ("address", "phone", "latitude", "longitude"):
+        if key in body.model_fields_set:
+            setattr(branch, key, getattr(body, key))
     await db.execute(update(Queue).where(Queue.branch_id == branch_id, Queue.tenant_id == branch.tenant_id).values(timezone=body.timezone))
     audit(db, Principal(identity.subject, str(branch.tenant_id), str(branch.id), ("admin",)), "branch.updated", branch.id)
     await db.commit()

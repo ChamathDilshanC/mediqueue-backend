@@ -1,5 +1,16 @@
 # MediQueue Backend
 
+Patient discovery is available at `/v1/patient/centers`; branch admins configure
+public address, phone and paired latitude/longitude through the branch API.
+`/v1/patient/schedules/{branch_id}` includes remaining session capacity and the
+caller's booking state. `/v1/patient/queue-status/{branch_id}` returns sanitized
+queue counts and approximate waits; owned ticket summaries include individual
+estimates. At least three measured recent service durations select a median;
+otherwise `average_service_minutes` (configurable per queue, default 5) is used.
+Apply Alembic revision `0009_patient_discovery` before deploying this feature.
+Existing local SQLite sidecars receive these additive columns on initialization
+or startup without dropping stored data.
+
 > The typed, tenant-scoped FastAPI service behind MediQueue.
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-API-05998b?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)

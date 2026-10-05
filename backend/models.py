@@ -1,7 +1,7 @@
 """Queue domain tables and constraints owned by the backend service."""
 import uuid
 from datetime import datetime, date
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,6 +21,10 @@ class Branch(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("iam.tenant.id"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+    address: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    phone: Mapped[str] = mapped_column(String(40), default="", server_default="")
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 class Queue(Base):
     __tablename__ = "queue"; __table_args__ = {"schema": "queue", "sqlite_autoincrement": True}
@@ -31,6 +35,7 @@ class Queue(Base):
     name: Mapped[str] = mapped_column(String(120))
     timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
     token_sequence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    average_service_minutes: Mapped[int] = mapped_column(Integer, default=5, server_default="5")
     service_type: Mapped[str] = mapped_column(String(30), default="GENERAL", nullable=False)
     room_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.room.id"), nullable=True)
 

@@ -9,6 +9,8 @@ from .entities import lock_branch, scoped
 from .models import Queue, QueueToken, Visit, Patient, PatientAccount, Room
 from .patient_portal import account
 from .schemas import Input
+from .queue_estimates import queue_snapshot
+from math import ceil
 
 router = APIRouter(prefix="/v1", tags=["Patient journey"])
 ACTIVE = ("WAITING", "CALLED", "RECALLED", "IN_SERVICE", "NO_SHOW")
@@ -16,7 +18,20 @@ ACTIVE = ("WAITING", "CALLED", "RECALLED", "IN_SERVICE", "NO_SHOW")
 @router.get("/patient/queues/{branch_id}")
 async def registration_queues(branch_id: uuid.UUID, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
     rows = (await db.scalars(select(Queue).where(Queue.branch_id == branch_id, Queue.service_type == "REGISTRATION").order_by(Queue.name))).all()
-    return [{"id": str(q.id), "name": q.name} for q in rows]
+    result = []
+    for q in rows:
+        _, summary = await queue_snapshot(q, db)
+        result.append({"id": str(q.id), "name": q.name, **summary})
+    return result
+
+@router.get("/patient/queue-status/{branch_id}")
+async def center_queue_status(branch_id: uuid.UUID, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
+    rows = (await db.scalars(select(Queue).where(Queue.branch_id == branch_id).order_by(Queue.name))).all()
+    result = []
+    for q in rows:
+        _, summary = await queue_snapshot(q, db)
+        result.append({"id": str(q.id), "name": q.name, "service_type": q.service_type, **summary})
+    return result
 
 @router.post("/patient/queues/{queue_id}/tickets", status_code=201)
 async def take_ticket(queue_id: uuid.UUID, idempotency_key: str = Header(..., min_length=1, max_length=200), identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
@@ -47,15 +62,17 @@ async def my_tickets(identity: Identity = Depends(current_identity), db: AsyncSe
     for token, q, room in rows:
         today = business_date(q)
         if q.id not in snapshots:
-            snapshots[q.id] = (await db.scalars(select(QueueToken).where(QueueToken.queue_id == q.id,
-                QueueToken.business_date == today).order_by(QueueToken.created_at, QueueToken.token_number))).all()
-        current = snapshots[q.id]
+            snapshots[q.id] = await queue_snapshot(q, db)
+        current, summary = snapshots[q.id]
         ahead = sum(1 for t in current if t.status == "WAITING" and (t.created_at, t.token_number) < (token.created_at, token.token_number)) if token.status == "WAITING" and token.business_date == today else None
         serving = [f"{t.token_number:03d}" for t in current if t.status in ("CALLED", "RECALLED", "IN_SERVICE")]
         result.append({"id": str(token.id), "visit_id": str(token.visit_id), "label": f"{token.token_number:03d}",
             "status": token.status, "queue": q.name, "stage": q.service_type, "room": room.name if room else q.name,
             "business_date": str(token.business_date), "is_today": token.business_date == today,
-            "ahead": ahead, "now_serving": serving, "created_at": token.created_at})
+            "ahead": ahead, "now_serving": serving, "created_at": token.created_at,
+            "waiting_count": summary["waiting_count"], "average_service_minutes": summary["average_service_minutes"],
+            "estimate_source": summary["estimate_source"], "as_of": summary["as_of"],
+            "estimated_wait_minutes": ceil((ahead + len(serving)) * summary["average_service_minutes"]) if ahead is not None else None})
     return result
 
 class Handoff(Input):

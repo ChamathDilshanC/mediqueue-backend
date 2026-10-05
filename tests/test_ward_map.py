@@ -31,9 +31,8 @@ async def test_bed_map_details_scope_planned_date_and_discharge(api):
     client, _ = api
     _, headers, _ = await onboard(client)
     department = await create(client, "departments", headers, {"name": "General medicine"})
-    ward = await create(client, "wards", headers, {"name": "Ward A", "department_id": department["id"]})
-    occupied = await create(client, "beds", headers, {"ward_id": ward["id"], "bed_number": "A-01"})
-    await create(client, "beds", headers, {"ward_id": ward["id"], "bed_number": "A-02"})
+    ward = await create(client, "wards", headers, {"name": "Ward A", "department_id": department["id"], "bed_capacity": 2, "bed_number_prefix": "A-"})
+    occupied = (await client.get(f'/v1/wards/{ward["id"]}/bed-map', headers=headers)).json()["beds"][0]
     patient = await create(client, "patients", headers, {"external_ref": "Patient One"})
     now = datetime.now(timezone.utc)
     body = {"patient_id": patient["id"], "ward_id": ward["id"], "bed_id": occupied["id"],
@@ -61,7 +60,7 @@ async def test_bed_map_details_scope_planned_date_and_discharge(api):
     discharged = await client.put(f'/v1/ward-admissions/{admission["id"]}', headers=headers, json={**update, "admission_status": "DISCHARGED", "discharged_by": "Doctor"})
     assert discharged.status_code == 200, discharged.text
     data = (await client.get(path, headers=headers)).json()
-    assert data["beds"][0]["status"] == "CLEANING"
+    assert data["beds"][0]["status"] == "AVAILABLE"
     assert data["beds"][0]["admission"]["discharged_at"]
     assert data["beds"][0]["admission"]["discharge_state"] == "DISCHARGED"
 

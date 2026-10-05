@@ -2,7 +2,7 @@
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import Field
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Identity, Principal, current_identity
 from .db import get_session
@@ -30,7 +30,9 @@ async def account(identity, db, tenant_id):
 @router.get("/centers")
 async def centers(identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
     rows = (await db.execute(select(Branch, Tenant).join(Tenant, Tenant.id == Branch.tenant_id).order_by(Tenant.name, Branch.name))).all()
-    return [{"id": str(b.id), "tenant_id": str(t.id), "name": f"{t.name} · {b.name}"} for b, t in rows]
+    return [{"id": str(b.id), "tenant_id": str(t.id), "name": f"{t.name} · {b.name}",
+             "hospital": t.name, "branch": b.name, "address": b.address, "phone": b.phone,
+             "latitude": b.latitude, "longitude": b.longitude, "timezone": b.timezone} for b, t in rows]
 
 @router.post("/profiles", status_code=201)
 async def enroll(body: Enrollment, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
@@ -58,8 +60,9 @@ async def overview(identity: Identity = Depends(current_identity), db: AsyncSess
     links = (await db.scalars(select(PatientAccount).where(PatientAccount.user_id == uuid.UUID(identity.subject)))).all()
     ids = [link.patient_id for link in links]
     profiles = (await db.scalars(select(Patient).where(Patient.id.in_(ids)))).all() if ids else []
-    bookings = (await db.execute(select(Appointment, Schedule, Doctor).join(Schedule, Appointment.schedule_id == Schedule.id)
+    bookings = (await db.execute(select(Appointment, Schedule, Doctor, Branch, Tenant).join(Schedule, Appointment.schedule_id == Schedule.id)
                                 .join(Doctor, Schedule.doctor_id == Doctor.id).where(Appointment.patient_id.in_(ids))
+                                .join(Branch, Branch.id == Schedule.branch_id).join(Tenant, Tenant.id == Branch.tenant_id)
                                 .order_by(Schedule.starts_at.desc()))).all() if ids else []
     records = (await db.scalars(select(ManagementRecord).where(ManagementRecord.patient_id.in_(ids))
                                 .order_by(ManagementRecord.created_at.desc()))).all() if ids else []
@@ -70,7 +73,9 @@ async def overview(identity: Identity = Depends(current_identity), db: AsyncSess
                              .where(WardAdmission.patient_id.in_(ids)).order_by(WardAdmission.admitted_at.desc()))).all() if ids else []
     return {"profiles": [{"id": str(p.id), "name": p.first_name or p.external_ref, "mrn": p.mrn, "tenant_id": str(p.tenant_id)} for p in profiles],
             "ward_stays": [{**stay_summary(a, b.timezone), "ward": w.name, "bed": bed.bed_number if bed else None, "timezone": b.timezone} for a, w, bed, b in stays],
-            "appointments": [{"id": str(a.id), "status": a.status, "doctor": d.name, "starts_at": s.starts_at} for a, s, d in bookings],
+            "appointments": [{"id": str(a.id), "schedule_id": str(s.id), "status": a.status, "doctor": d.name,
+                "starts_at": s.starts_at, "ends_at": s.ends_at, "center": f"{t.name} · {b.name}", "timezone": b.timezone,
+                "address": b.address, "latitude": b.latitude, "longitude": b.longitude} for a, s, d, b, t in bookings],
             "records": [{**output(r), "module": r.module} for r in visible]}
 
 @router.get("/schedules/{branch_id}")
@@ -79,7 +84,16 @@ async def schedules(branch_id: uuid.UUID, identity: Identity = Depends(current_i
     rows = (await db.execute(select(Schedule, Doctor).join(Doctor, Doctor.id == Schedule.doctor_id)
                             .where(Schedule.branch_id == branch_id, Schedule.ends_at > datetime.now(timezone.utc))
                             .order_by(Schedule.starts_at).limit(200))).all()
-    return [{"id": str(s.id), "doctor": d.name, "specialty": d.specialty, "starts_at": s.starts_at, "capacity": s.capacity} for s, d in rows]
+    counts = dict((await db.execute(select(Appointment.schedule_id, func.count()).where(
+        Appointment.schedule_id.in_([s.id for s, _ in rows]), Appointment.status != "CANCELLED"
+    ).group_by(Appointment.schedule_id))).all()) if rows else {}
+    links = select(PatientAccount.patient_id).where(PatientAccount.user_id == uuid.UUID(identity.subject))
+    booked = set((await db.scalars(select(Appointment.schedule_id).where(
+        Appointment.patient_id.in_(links), Appointment.status != "CANCELLED",
+        Appointment.schedule_id.in_([s.id for s, _ in rows])))).all()) if rows else set()
+    return [{"id": str(s.id), "doctor": d.name, "specialty": d.specialty, "starts_at": s.starts_at,
+             "ends_at": s.ends_at, "capacity": s.capacity, "remaining": max(0, s.capacity - counts.get(s.id, 0)),
+             "already_booked": s.id in booked} for s, d in rows]
 
 class Booking(Input):
     schedule_id: uuid.UUID

@@ -90,7 +90,7 @@ async def test_bed_admission_occupancy_and_discharge(api):
     result = await client.put(f'/v1/ward-admissions/{admission["id"]}', headers=headers, json={**body, "admission_status": "DISCHARGED"})
     assert result.status_code == 200, result.text
     assert result.json()["discharged_at"]
-    assert (await client.get(f'/v1/beds/{bed["id"]}', headers=headers)).json()["status"] == "CLEANING"
+    assert (await client.get(f'/v1/beds/{bed["id"]}', headers=headers)).json()["status"] == "AVAILABLE"
     assert (await client.delete(f'/v1/ward-admissions/{admission["id"]}', headers=headers)).status_code == 409
 
 async def test_stock_uniqueness_and_staff_dispensing(api):
@@ -123,3 +123,23 @@ async def test_branch_with_management_history_cannot_be_deleted(api):
     scoped_headers = {**headers, "X-Branch-ID": branch["id"]}
     await create(client, "staff-directory", scoped_headers, {"name": "Staff member", "designation": "Reception"})
     assert (await client.delete(f'/v1/branches/{branch["id"]}', headers=scoped_headers)).status_code == 409
+
+async def test_capacity_beds_discharge_and_reuse(api):
+    client, _ = api
+    _, headers, _ = await onboard(client)
+    department = await create(client, "departments", headers, {"name": "Medicine"})
+    ward = await create(client, "wards", headers, {"name": "Capacity ward", "department_id": department["id"], "bed_capacity": 2})
+    snapshot = (await client.get(f'/v1/wards/{ward["id"]}/bed-map', headers=headers)).json()
+    assert snapshot["summary"]["available"] == 2
+    bed = snapshot["beds"][0]
+    patient = await create(client, "patients", headers, {"external_ref": "Discharge patient"})
+    body = {"patient_id": patient["id"], "ward_id": ward["id"], "bed_id": bed["id"]}
+    admission = await create(client, "ward-admissions", headers, body)
+    result = await client.post(f'/v1/ward-admissions/{admission["id"]}/discharge', headers=headers)
+    assert result.status_code == 200, result.text
+    assert result.json()["admission_status"] == "DISCHARGED"
+    assert result.json()["discharged_at"] and result.json()["discharged_by"]
+    assert (await client.post(f'/v1/ward-admissions/{admission["id"]}/discharge', headers=headers)).status_code == 409
+    other = await create(client, "patients", headers, {"external_ref": "Next patient"})
+    await create(client, "ward-admissions", headers, {**body, "patient_id": other["id"]})
+    assert (await client.get(f'/v1/ward-admissions/{admission["id"]}', headers=headers)).json()["admission_status"] == "DISCHARGED"

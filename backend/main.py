@@ -22,7 +22,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Principal, current_principal, require_scope
-from .db import get_session
+from .db import get_session, ensure_sqlite_discovery_columns
 from .models import Queue, QueueToken, Visit, Patient, Tenant, AuditEvent, OutboxEvent, IdempotencyKey, ManagementRecord, PatientAccount
 from .settings import get_settings
 
@@ -36,6 +36,14 @@ async def lifespan(app: FastAPI):
     """Ensure newly added columns exist in the database table if migrations haven't run."""
     try:
         async for session in get_session():
+            if session.bind.dialect.name == "sqlite":
+                await session.run_sync(lambda sync_session: ensure_sqlite_discovery_columns(sync_session.connection()))
+                await session.commit()
+            await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS address VARCHAR(500) NOT NULL DEFAULT ''"))
+            await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS phone VARCHAR(40) NOT NULL DEFAULT ''"))
+            await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION"))
+            await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION"))
+            await session.execute(text("ALTER TABLE queue.queue ADD COLUMN IF NOT EXISTS average_service_minutes INTEGER NOT NULL DEFAULT 5"))
             await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS code VARCHAR(20) DEFAULT ''"))
             await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''"))
             await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS location VARCHAR(200) DEFAULT ''"))

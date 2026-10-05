@@ -96,6 +96,16 @@ class HospitalInput(Input):
 
 class BranchInput(HospitalInput):
     timezone: str = Field(default="Asia/Colombo", max_length=64)
+    address: str = Field(default="", max_length=500)
+    phone: str = Field(default="", max_length=40)
+    latitude: float | None = Field(default=None, ge=-90, le=90, allow_inf_nan=False)
+    longitude: float | None = Field(default=None, ge=-180, le=180, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def coordinate_pair(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("Provide both latitude and longitude, or leave both blank")
+        return self
 
     @field_validator("timezone")
     @classmethod
@@ -118,6 +128,10 @@ class HospitalOutput(Output):
 class BranchOutput(HospitalOutput):
     tenant_id: uuid.UUID
     timezone: str
+    address: str = ""
+    phone: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class HospitalRegistration(Output):
@@ -277,6 +291,7 @@ class RoomOutput(ScopedOutput):
 
 
 class QueueInput(Input):
+    average_service_minutes: int = Field(default=5, ge=1, le=120)
     name: str = Field(min_length=1, max_length=120)
     department_id: uuid.UUID | None = None
     service_type: Literal["GENERAL", "REGISTRATION", "CONSULTATION", "DISPENSARY"] = "GENERAL"
@@ -284,6 +299,7 @@ class QueueInput(Input):
 
 
 class QueueOutput(ScopedOutput):
+    average_service_minutes: int = 5
     department_id: uuid.UUID | None = None
     service_type: str
     room_id: uuid.UUID | None = None

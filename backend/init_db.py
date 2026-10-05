@@ -1,7 +1,7 @@
 """Create a local SQLite database: python -m backend.init_db."""
 import asyncio
 from . import models
-from .db import Base, engine
+from .db import Base, engine, ensure_sqlite_discovery_columns
 
 
 async def main():
@@ -9,6 +9,7 @@ async def main():
         raise SystemExit("Use alembic upgrade head for PostgreSQL")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(ensure_sqlite_discovery_columns)
     await engine.dispose()
     print("Local SQLite schemas initialized.")
 

@@ -119,6 +119,24 @@ async def validate_entity(model, data, p, db, item_id=None):
             raise HTTPException(409, "Patient reference already exists in this hospital")
 
 
+@router.post("/ward-admissions/{item_id}/discharge", response_model=WardAdmissionOutput, tags=["Ward-Admissions"])
+async def discharge_admission(item_id: uuid.UUID, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
+    require_role(p, "admin", "staff", "reception")
+    await lock_branch(p, db)
+    admission = await scoped(WardAdmission, item_id, p, db, lock=True)
+    if admission.admission_status != "ADMITTED":
+        raise HTTPException(409, "Only active admissions can be discharged")
+    if admission.bed_id:
+        bed = await scoped(Bed, admission.bed_id, p, db, lock=True)
+        bed.status = "AVAILABLE"
+    admission.admission_status = "DISCHARGED"
+    admission.discharged_at = datetime.now(timezone.utc)
+    admission.discharged_by = p.subject
+    audit(db, p, "ward-admissions.discharged", admission.id)
+    await db.commit()
+    return admission
+
+
 DEPENDENCIES = {
     Department: [(Doctor, Doctor.department_id), (Room, Room.department_id), (Ward, Ward.department_id)],
     Room: [(Schedule, Schedule.room_id)],
@@ -191,7 +209,7 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
         db.add(item)
         await db.flush()
         if model is Ward:
-            for index in range(bed_setup["initial_bed_count"]):
+            for index in range((bed_setup["initial_bed_count"] or item.bed_capacity)):
                 bed = Bed(tenant_id=item.tenant_id, branch_id=item.branch_id, ward_id=item.id,
                     bed_number=f'{bed_setup["bed_number_prefix"]}{bed_setup["bed_start_number"] + index:03d}',
                     bed_type=bed_setup["initial_bed_type"], status="AVAILABLE", is_active=True)
@@ -224,7 +242,7 @@ def resource_routes(path, model, input_schema, output_schema, write_roles=("admi
             if data["patient_id"] != item.patient_id:
                 raise HTTPException(409, "Admission patient cannot be changed")
             if item.bed_id and (item.bed_id != data.get("bed_id") or data["admission_status"] != "ADMITTED"):
-                (await scoped(Bed, item.bed_id, p, db)).status = "CLEANING"
+                (await scoped(Bed, item.bed_id, p, db)).status = "AVAILABLE"
             if data.get("bed_id") and data["admission_status"] == "ADMITTED":
                 (await scoped(Bed, data["bed_id"], p, db)).status = "OCCUPIED"
                 if data["bed_id"] != item.bed_id:
