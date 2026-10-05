@@ -58,8 +58,8 @@ async def test_patient_sessions_show_remaining_capacity_and_own_booking(api):
     before = (await client.get(path, headers=owner)).json()[0]
     assert before["remaining"] == 1 and before["already_booked"] is False
     assert (await client.post("/v1/patient/appointments", headers=owner, json={"schedule_id": schedule["id"]})).status_code == 403
-    for identity in (owner, other):
-        assert (await client.post("/v1/patient/profiles", headers=identity, json={"branch_id": branch_id, "full_name": "Patient", "mobile": "0771234567"})).status_code == 201
+    for index, identity in enumerate((owner, other), start=1):
+        assert (await client.post("/v1/patient/profiles", headers=identity, json={"branch_id": branch_id, "full_name": "Patient", "mobile": f"077123456{index}"})).status_code == 201
     booked = await client.post("/v1/patient/appointments", headers=owner, json={"schedule_id": schedule["id"]})
     assert booked.status_code == 201, booked.text
     after = (await client.get(path, headers=owner)).json()[0]

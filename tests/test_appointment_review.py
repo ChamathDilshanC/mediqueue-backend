@@ -22,8 +22,8 @@ async def test_patient_requests_staff_review_capacity_and_attendance(api):
         "starts_at": starts.isoformat(), "ends_at": (starts + timedelta(hours=2)).isoformat(), "capacity": 1})
     owner = {"Authorization": f"Bearer {token(uuid.uuid4())}"}
     second = {"Authorization": f"Bearer {token(uuid.uuid4())}"}
-    for headers, name in ((owner, "Patient Chamath"), (second, "Patient Two")):
-        result = await client.post("/v1/patient/profiles", headers=headers, json={"branch_id": branch, "full_name": name, "mobile": "0771234567"})
+    for index, (headers, name) in enumerate(((owner, "Patient Chamath"), (second, "Patient Two")), start=1):
+        result = await client.post("/v1/patient/profiles", headers=headers, json={"branch_id": branch, "full_name": name, "mobile": f"077123456{index}"})
         assert result.status_code == 201, result.text
     body = {"schedule_id": schedule["id"]}
     requested = await client.post("/v1/patient/appointments", headers=owner, json=body)

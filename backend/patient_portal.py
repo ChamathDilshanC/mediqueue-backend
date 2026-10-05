@@ -4,7 +4,8 @@ import asyncio
 from decimal import Decimal
 import stripe
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import Field
+from pydantic import Field, field_validator
+import re
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Identity, Principal, current_identity
@@ -24,6 +25,25 @@ class Enrollment(Input):
     branch_id: uuid.UUID
     full_name: str = Field(min_length=1, max_length=200)
     mobile: str = Field(min_length=1, max_length=30)
+    nic: str = Field(default="", max_length=30)
+
+    @field_validator("mobile")
+    @classmethod
+    def valid_mobile(cls, value):
+        value = re.sub(r"[\s-]", "", value)
+        if value.startswith("+94"):
+            value = "0" + value[3:]
+        if not re.fullmatch(r"07\d{8}", value):
+            raise ValueError("Use a valid Sri Lankan mobile number (07XXXXXXXX)")
+        return value
+
+    @field_validator("nic")
+    @classmethod
+    def valid_nic(cls, value):
+        value = value.strip().upper()
+        if value and not re.fullmatch(r"(?:\d{9}[VX]|\d{12})", value):
+            raise ValueError("Use a valid NIC (9 digits with V/X or 12 digits)")
+        return value
 
 async def account(identity, db, tenant_id):
     row = await db.scalar(select(PatientAccount).where(PatientAccount.user_id == uuid.UUID(identity.subject), PatientAccount.tenant_id == tenant_id))
@@ -46,11 +66,25 @@ async def enroll(body: Enrollment, identity: Identity = Depends(current_identity
     branch = await db.get(Branch, body.branch_id)
     if not branch:
         raise HTTPException(404, "Center not found")
+    await db.scalar(select(Tenant).where(Tenant.id == branch.tenant_id).with_for_update())
     existing = await db.scalar(select(PatientAccount).where(PatientAccount.user_id == profile.id, PatientAccount.tenant_id == branch.tenant_id))
     if existing:
         return {"id": str(existing.patient_id)}
+    duplicate = await db.scalar(select(Patient).where(
+        Patient.tenant_id == branch.tenant_id,
+        Patient.mobile == body.mobile,
+    ))
+    if duplicate:
+        raise HTTPException(409, "This mobile number is already registered at this hospital")
+    if body.nic:
+        duplicate = await db.scalar(select(Patient).where(
+            Patient.tenant_id == branch.tenant_id,
+            Patient.nic == body.nic,
+        ))
+        if duplicate:
+            raise HTTPException(409, "This NIC is already registered at this hospital")
     patient = Patient(tenant_id=branch.tenant_id, external_ref=f"{body.full_name[:170]} · P-{profile.id.hex[:12]}",
-                      first_name=body.full_name, mobile=body.mobile, email=identity.email,
+                      first_name=body.full_name, mobile=body.mobile, nic=body.nic, email=identity.email,
                       mrn=f"P-{uuid.uuid4().hex[:12].upper()}")
     db.add(patient)
     await db.flush()
@@ -108,12 +142,14 @@ async def schedules(branch_id: uuid.UUID, identity: Identity = Depends(current_i
     booked = set((await db.scalars(select(Appointment.schedule_id).where(
         Appointment.patient_id.in_(links), Appointment.status.notin_(("CANCELLED", "REJECTED")),
         Appointment.schedule_id.in_([s.id for s, _ in rows])))).all()) if rows else set()
-    return [{"id": str(s.id), "doctor": d.name, "specialty": d.specialty, "starts_at": s.starts_at,
+    return [{"id": str(s.id), "doctor": d.name, "specialty": d.specialty, "quotation_template": d.quotation_template or [],
+             "starts_at": s.starts_at,
              "ends_at": s.ends_at, "capacity": s.capacity, "remaining": max(0, s.capacity - counts.get(s.id, 0)),
              "already_booked": s.id in booked} for s, d in rows]
 
 class Booking(Input):
     schedule_id: uuid.UUID
+    quotation_items: list[str] | None = Field(default=None, max_length=50)
 
 class PaymentChoice(Input):
     method: str = Field(pattern="^(ONLINE|PAY_AT_HOSPITAL)$")
@@ -126,7 +162,13 @@ async def book(body: Booking, identity: Identity = Depends(current_identity), db
     link = await account(identity, db, schedule.tenant_id)
     # Reuse the transactional staff command only after enforcing identity ownership.
     principal = Principal(identity.subject, str(schedule.tenant_id), str(schedule.branch_id), ("reception",))
-    row = await create_appointment(AppointmentInput(schedule_id=schedule.id, patient_id=link.patient_id), principal, db, patient_requested=True)
+    row = await create_appointment(
+        AppointmentInput(schedule_id=schedule.id, patient_id=link.patient_id),
+        principal,
+        db,
+        patient_requested=True,
+        quotation_items=body.quotation_items,
+    )
     return {"id": str(row.id), "status": row.status}
 
 @router.patch("/appointments/{appointment_id}/cancel")

@@ -1,5 +1,6 @@
 """Strict input contracts shared by the identity and entity APIs."""
 import uuid
+import re
 from datetime import datetime
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -268,6 +269,24 @@ class PatientInput(Input):
     city: str = Field(default="", max_length=100)
     allergies: str = Field(default="", max_length=500)
     status: Literal["ACTIVE", "INACTIVE", "DECEASED", "ARCHIVED"] = "ACTIVE"
+
+    @field_validator("mobile")
+    @classmethod
+    def valid_mobile(cls, value):
+        value = re.sub(r"[\s-]", "", value)
+        if value.startswith("+94"):
+            value = "0" + value[3:]
+        if not re.fullmatch(r"07\d{8}", value):
+            raise ValueError("Use a valid Sri Lankan mobile number (07XXXXXXXX)")
+        return value
+
+    @field_validator("nic")
+    @classmethod
+    def valid_nic(cls, value):
+        value = value.strip().upper()
+        if value and not re.fullmatch(r"(?:\d{9}[VX]|\d{12})", value):
+            raise ValueError("Use a valid NIC (9 digits with V/X or 12 digits)")
+        return value
 
 
 class PatientOutput(Output):

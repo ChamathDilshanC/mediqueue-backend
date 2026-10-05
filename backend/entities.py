@@ -129,6 +129,22 @@ async def validate_entity(model, data, p, db, item_id=None):
             query = query.where(Patient.id != item_id)
         if await db.scalar(query):
             raise HTTPException(409, "Patient reference already exists in this hospital")
+        if data.get("mobile"):
+            duplicate = select(Patient.id).where(
+                *scope(Patient, p), Patient.mobile == data["mobile"]
+            )
+            if item_id:
+                duplicate = duplicate.where(Patient.id != item_id)
+            if await db.scalar(duplicate):
+                raise HTTPException(409, "Mobile number already exists in this hospital")
+        if data.get("nic"):
+            duplicate = select(Patient.id).where(
+                *scope(Patient, p), Patient.nic == data["nic"]
+            )
+            if item_id:
+                duplicate = duplicate.where(Patient.id != item_id)
+            if await db.scalar(duplicate):
+                raise HTTPException(409, "NIC already exists in this hospital")
 
 
 @router.post("/ward-admissions/{item_id}/discharge", response_model=WardAdmissionOutput, tags=["Ward-Admissions"])
@@ -352,7 +368,7 @@ async def book_appointment(body: AppointmentInput, p: Principal = Depends(curren
     return await create_appointment(body, p, db)
 
 
-async def create_appointment(body, p, db, patient_requested=False):
+async def create_appointment(body, p, db, patient_requested=False, quotation_items=None):
     """Book against a locked schedule. Reject duplicate active bookings, full or ended sessions."""
     require_role(p, "admin", "staff", "reception")
     await lock_branch(p, db)
@@ -368,11 +384,15 @@ async def create_appointment(body, p, db, patient_requested=False):
     count = await db.scalar(select(func.count()).select_from(Appointment).where(*active))
     if count >= schedule.capacity:
         raise HTTPException(409, "Schedule is full")
+    quotation = [*doctor.quotation_template]
+    if quotation_items is not None:
+        requested_items = set(quotation_items)
+        quotation = [item for item in quotation if item.get("name") in requested_items]
     row = Appointment(
         tenant_id=uuid.UUID(p.tenant_id),
         branch_id=uuid.UUID(p.branch_id),
         **body.model_dump(),
-        quotation=[*doctor.quotation_template],
+        quotation=quotation,
         status="PENDING" if patient_requested else "BOOKED",
         source="PATIENT" if patient_requested else "STAFF",
     )
