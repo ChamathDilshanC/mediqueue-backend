@@ -215,6 +215,7 @@ async def appointment_payment(appointment_id: uuid.UUID, body: PaymentChoice,
             success_url=settings.stripe_success_url,
             cancel_url=settings.stripe_cancel_url,
             client_reference_id=str(row.id),
+            timeout=10,
             line_items=[{
                 "price_data": {
                     "currency": "lkr",
