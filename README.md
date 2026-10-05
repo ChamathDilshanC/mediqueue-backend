@@ -89,8 +89,12 @@ STRIPE_CANCEL_URL=https://<frontend-origin>/patient?payment=cancelled
 CONFIG_PATH=configuration/defaults.json
 ```
 
-Hospital staff can add appointment quotations from the appointment inbox. Patients
-can then choose Stripe Checkout or pay at the hospital from their appointment card.
+When creating a doctor, hospital staff can optionally save a default quotation
+template using one item per line in the form `name | amount` (for example,
+`Consultation fee | 2500`). New appointments for that doctor copy this template
+automatically, while staff can still edit the final quotation from the
+appointment inbox. Patients can then choose Stripe Checkout or pay at the
+hospital from their appointment card.
 Keep `STRIPE_SECRET_KEY` server-side; online payment is unavailable until it is set.
 
 Use the Supabase Session Pooler on port `5432` for Vercel. Encode password

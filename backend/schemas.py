@@ -219,11 +219,13 @@ class DepartmentOutput(ScopedOutput):
 class DoctorInput(HospitalInput):
     department_id: uuid.UUID
     specialty: str = Field(default="", max_length=200)
+    quotation_template: list[dict] = Field(default_factory=list, max_length=50)
 
 
 class DoctorOutput(ScopedOutput):
     department_id: uuid.UUID
     specialty: str
+    quotation_template: list[dict] = []
 
 
 class ScheduleInput(Input):

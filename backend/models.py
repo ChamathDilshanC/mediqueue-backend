@@ -197,6 +197,7 @@ class Doctor(Base):
     department_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scheduling.department.id"))
     name: Mapped[str] = mapped_column(String(200))
     specialty: Mapped[str] = mapped_column(String(200), default="")
+    quotation_template: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
 
 
 class Schedule(Base):

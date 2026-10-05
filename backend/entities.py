@@ -55,6 +55,18 @@ async def validate_entity(model, data, p, db, item_id=None):
         await scoped(Department, data["department_id"], p, db)
     elif model is Doctor:
         await scoped(Department, data["department_id"], p, db)
+        quotation = []
+        for item in data.get("quotation_template", []):
+            if not isinstance(item.get("name"), str) or not item["name"].strip():
+                raise HTTPException(422, "Every quotation item needs a name")
+            try:
+                amount = float(item.get("amount", 0))
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(422, "Quotation amounts must be numbers") from exc
+            if amount < 0:
+                raise HTTPException(422, "Quotation amounts cannot be negative")
+            quotation.append({"name": item["name"].strip(), "amount": round(amount, 2)})
+        data["quotation_template"] = quotation
     elif model is Ward:
         await scoped(Department, data["department_id"], p, db)
     elif model is Bed:
@@ -346,6 +358,7 @@ async def create_appointment(body, p, db, patient_requested=False):
     await lock_branch(p, db)
     schedule = await scoped(Schedule, body.schedule_id, p, db, lock=True)
     await scoped(Patient, body.patient_id, p, db)
+    doctor = await scoped(Doctor, schedule.doctor_id, p, db)
     ends_at = schedule.ends_at.replace(tzinfo=timezone.utc) if schedule.ends_at.tzinfo is None else schedule.ends_at
     if ends_at <= datetime.now(timezone.utc):
         raise HTTPException(409, "Schedule has ended")
@@ -355,7 +368,14 @@ async def create_appointment(body, p, db, patient_requested=False):
     count = await db.scalar(select(func.count()).select_from(Appointment).where(*active))
     if count >= schedule.capacity:
         raise HTTPException(409, "Schedule is full")
-    row = Appointment(tenant_id=uuid.UUID(p.tenant_id), branch_id=uuid.UUID(p.branch_id), **body.model_dump(), status="PENDING" if patient_requested else "BOOKED", source="PATIENT" if patient_requested else "STAFF")
+    row = Appointment(
+        tenant_id=uuid.UUID(p.tenant_id),
+        branch_id=uuid.UUID(p.branch_id),
+        **body.model_dump(),
+        quotation=[*doctor.quotation_template],
+        status="PENDING" if patient_requested else "BOOKED",
+        source="PATIENT" if patient_requested else "STAFF",
+    )
     db.add(row)
     await db.flush()
     audit(db, p, "appointment.requested" if patient_requested else "appointment.booked", row.id)

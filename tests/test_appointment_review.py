@@ -10,7 +10,12 @@ async def test_patient_requests_staff_review_capacity_and_attendance(api):
     _, other_admin, _ = await onboard(client, "Other hospital")
     branch = hospital["branch"]["id"]
     department = await create(client, "departments", admin, {"name": "Medicine"})
-    doctor = await create(client, "doctors", admin, {"name": "Dr Chamath", "department_id": department["id"]})
+    doctor = await create(client, "doctors", admin, {
+        "name": "Dr Chamath",
+        "department_id": department["id"],
+        "quotation_template": [{"name": "Consultation fee", "amount": 2500}],
+    })
+    assert doctor["quotation_template"] == [{"name": "Consultation fee", "amount": 2500}]
     room = await create(client, "rooms", admin, {"name": "Consultation 1"})
     starts = datetime.now(timezone.utc) + timedelta(days=1)
     schedule = await create(client, "schedules", admin, {"doctor_id": doctor["id"], "room_id": room["id"],
@@ -23,6 +28,9 @@ async def test_patient_requests_staff_review_capacity_and_attendance(api):
     body = {"schedule_id": schedule["id"]}
     requested = await client.post("/v1/patient/appointments", headers=owner, json=body)
     assert requested.status_code == 201 and requested.json()["status"] == "PENDING"
+    assert (await client.get("/v1/patient/overview", headers=owner)).json()["appointments"][0]["quotation"] == [
+        {"name": "Consultation fee", "amount": 2500}
+    ]
     path = f'/v1/appointments/{requested.json()["id"]}'
     assert (await client.post("/v1/patient/appointments", headers=second, json=body)).status_code == 409
     assert (await client.patch(path, headers=owner, json={"status": "BOOKED"})).status_code == 403
