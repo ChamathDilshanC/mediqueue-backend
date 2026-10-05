@@ -58,6 +58,7 @@ async def lifespan(app: FastAPI):
             await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS location VARCHAR(200) DEFAULT ''"))
             await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS head_of_dept VARCHAR(200) DEFAULT ''"))
             await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE"))
+            await session.execute(text("ALTER TABLE scheduling.doctor ADD COLUMN IF NOT EXISTS quotation_template JSONB NOT NULL DEFAULT '[]'::jsonb"))
             await session.execute(text("ALTER TABLE scheduling.room ADD COLUMN IF NOT EXISTS department_id UUID"))
             await session.execute(text("ALTER TABLE queue.queue ADD COLUMN IF NOT EXISTS department_id UUID"))
             await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS mrn VARCHAR(50) DEFAULT ''"))
