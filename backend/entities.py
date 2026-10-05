@@ -327,14 +327,18 @@ resource_routes("visits", Visit, VisitInput, VisitOutput, ("admin", "staff", "re
 
 @router.get("/appointment-inbox", tags=["Appointments"])
 async def appointment_inbox(p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session),
-                            status: str = Query("", pattern="^(|PENDING|BOOKED|REJECTED|CHECKED_IN|COMPLETED|CANCELLED|NO_SHOW)$"),
+                            status: str = Query("", pattern="^(|ACTIVE|INVALID|PENDING|BOOKED|REJECTED|CHECKED_IN|COMPLETED|CANCELLED|NO_SHOW)$"),
                             q: str = Query("", max_length=200), limit: int = Query(20, ge=1, le=200), offset: int = Query(0, ge=0)):
     require_role(p, *READ_ROLES)
     base = select(Appointment, Patient, Schedule, Doctor, Room, Branch).join(Patient, Patient.id == Appointment.patient_id).join(
         Schedule, Schedule.id == Appointment.schedule_id).join(Doctor, Doctor.id == Schedule.doctor_id).join(
         Room, Room.id == Schedule.room_id).join(Branch, Branch.id == Appointment.branch_id).where(*scope(Appointment, p))
     counts = dict((await db.execute(select(Appointment.status, func.count()).where(*scope(Appointment, p)).group_by(Appointment.status))).all())
-    if status:
+    if status == "ACTIVE":
+        base = base.where(Appointment.status.in_(("PENDING", "BOOKED", "CHECKED_IN")))
+    elif status == "INVALID":
+        base = base.where(Appointment.status.in_(("REJECTED", "CANCELLED", "NO_SHOW")))
+    elif status:
         base = base.where(Appointment.status == status)
     if q.strip():
         term = "%" + q.strip().replace("%", "\\%").replace("_", "\\_") + "%"
