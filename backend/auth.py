@@ -1,5 +1,7 @@
 """Verified Supabase identities and database-backed branch authorization."""
+import asyncio
 from dataclasses import dataclass
+import time
 import uuid
 
 import httpx
@@ -14,6 +16,41 @@ from .models import Membership
 from .settings import get_settings
 
 bearer = HTTPBearer(auto_error=False)
+JWKS_UNKNOWN_KID_REFRESH_SECONDS = 30
+_jwks_cache: dict = {"url": None, "keys": [], "fetched_at": float("-inf")}
+_jwks_lock = asyncio.Lock()
+
+
+def _find_key(keys: list[dict], kid: str | None) -> dict | None:
+    return next((key for key in keys if key.get("kid") == kid), None)
+
+
+async def signing_key(url: str, kid: str | None, ttl: int) -> dict:
+    """Return a JWKS key, refreshing on expiry or on an unseen key id (rotation)."""
+    cache = _jwks_cache
+    if cache["url"] == url and time.monotonic() - cache["fetched_at"] < ttl:
+        key = _find_key(cache["keys"], kid)
+        if key is not None:
+            return key
+    async with _jwks_lock:
+        now = time.monotonic()
+        age = now - cache["fetched_at"] if cache["url"] == url else float("inf")
+        key = _find_key(cache["keys"], kid) if cache["url"] == url else None
+        if age >= ttl or (key is None and age >= JWKS_UNKNOWN_KID_REFRESH_SECONDS):
+            try:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                keys = response.json()["keys"]
+                cache.update(url=url, keys=keys, fetched_at=now)
+                key = _find_key(keys, kid)
+            except httpx.HTTPError:
+                # Keep verifying with the last good key set during a provider hiccup.
+                if key is None:
+                    raise
+        if key is None:
+            raise KeyError("Unknown signing key")
+        return key
 
 
 @dataclass(frozen=True)
@@ -43,10 +80,7 @@ async def current_identity(credentials: HTTPAuthorizationCredentials | None = De
             key = settings.supabase_jwt_secret
         elif algorithm in {"RS256", "ES256"}:
             url = settings.supabase_jwks_url or f"{settings.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
-            async with httpx.AsyncClient(timeout=5) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-            key = next(k for k in response.json()["keys"] if k.get("kid") == header.get("kid"))
+            key = await signing_key(url, header.get("kid"), settings.jwks_cache_seconds)
         else:
             raise ValueError("Unsupported signing algorithm")
         claims = jwt.decode(token, key, algorithms=[algorithm], audience="authenticated",
@@ -98,6 +132,33 @@ def require_role(principal: Principal, *roles: str) -> None:
         raise HTTPException(403, "Role denied")
 
 
-def require_system_admin(identity: Identity) -> None:
-    if identity.email != "chamathdilshan.dev@gmail.com":
+async def fetch_auth_user(access_token: str) -> dict:
+    """Read the authoritative Supabase user record (confirmation state is not in user-editable claims)."""
+    settings = get_settings()
+    if not settings.supabase_url or not settings.supabase_anon_key:
+        raise HTTPException(503, "Identity provider is not configured")
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{settings.supabase_url.rstrip('/')}/auth/v1/user",
+                                        headers={"apikey": settings.supabase_anon_key,
+                                                 "Authorization": f"Bearer {access_token}"})
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, "Identity provider unavailable") from exc
+    if response.status_code in (401, 403):
+        raise HTTPException(401, "Invalid or expired token", headers={"WWW-Authenticate": "Bearer"})
+    if response.status_code >= 400:
+        raise HTTPException(503, "Identity provider unavailable")
+    return response.json()
+
+
+async def current_system_admin(credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> Identity:
+    """Platform operators: allowlisted (SYSTEM_ADMIN_EMAILS) and with a confirmed email."""
+    identity = await current_identity(credentials)
+    email = identity.email.strip().lower()
+    if not email or email not in get_settings().system_admins:
         raise HTTPException(403, "System admin role required")
+    user = await fetch_auth_user(credentials.credentials)
+    if (str(user.get("id")) != identity.subject or str(user.get("email") or "").strip().lower() != email
+            or not user.get("email_confirmed_at")):
+        raise HTTPException(403, "System admin role required")
+    return identity

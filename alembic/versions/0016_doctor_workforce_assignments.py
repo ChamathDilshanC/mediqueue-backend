@@ -9,6 +9,9 @@ depends_on = None
 
 
 def upgrade():
+    # This revision id is 33 characters; Alembic creates version_num as VARCHAR(32),
+    # so recording it would fail on PostgreSQL without a wider column.
+    op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)")
     op.execute("""
         ALTER TABLE scheduling.staff_shift
         ADD COLUMN IF NOT EXISTS doctor_id UUID REFERENCES scheduling.doctor(id);

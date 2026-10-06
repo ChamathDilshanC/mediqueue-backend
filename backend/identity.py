@@ -7,7 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import func, select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .auth import Identity, Principal, bearer, current_identity, current_principal, require_role, require_scope, require_system_admin
+from .auth import Identity, Principal, bearer, current_identity, current_principal, current_system_admin, require_role, require_scope
 from .db import get_session
 from .models import AuditEvent, Branch, Department, Doctor, ManagementRecord, Membership, OrganizationApplication, Queue, Room, Schedule, Tenant, UserProfile, Visit
 from .schemas import (ERROR_RESPONSES, AuthResult, BranchCreateInput, BranchInput, BranchOutput, Credentials, HospitalInput,
@@ -143,9 +143,18 @@ async def update_me(body: ProfileInput, identity: Identity = Depends(current_ide
 
 
 @router.post("/hospitals", tags=["Hospitals"], response_model=HospitalRegistration, status_code=201)
-async def register_hospital(body: HospitalRegister, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
-    """Register a hospital, its first branch and the verified caller's admin membership atomically."""
-    profile = await ensure_profile(db, identity)
+async def register_hospital(body: HospitalRegister, identity: Identity = Depends(current_system_admin), db: AsyncSession = Depends(get_session)):
+    """System admins only: provision a verified hospital, its first branch and its admin atomically.
+
+    Organizations request access through /hospital-applications; self-service creation would
+    bypass manual verification. `admin_user_id` defaults to the calling system admin.
+    """
+    if body.admin_user_id:
+        profile = await db.get(UserProfile, body.admin_user_id)
+        if profile is None:
+            raise HTTPException(404, "Registered user profile not found")
+    else:
+        profile = await ensure_profile(db, identity)
     tenant = Tenant(name=body.name)
     db.add(tenant)
     await db.flush()
@@ -185,15 +194,13 @@ async def my_hospital_applications(identity: Identity = Depends(current_identity
 
 
 @router.get("/admin/hospital-applications", tags=["Hospitals"], response_model=list[OrganizationApplicationOutput])
-async def admin_list_applications(identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
-    require_system_admin(identity)
+async def admin_list_applications(identity: Identity = Depends(current_system_admin), db: AsyncSession = Depends(get_session)):
     return (await db.scalars(select(OrganizationApplication).order_by(OrganizationApplication.status.desc(), OrganizationApplication.id))).all()
 
 
 @router.patch("/admin/hospital-applications/{application_id}", tags=["Hospitals"], response_model=OrganizationApplicationOutput)
-async def admin_update_application(application_id: uuid.UUID, body: AdminApplicationPatch, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
-    require_system_admin(identity)
-    app = await db.get(OrganizationApplication, application_id)
+async def admin_update_application(application_id: uuid.UUID, body: AdminApplicationPatch, identity: Identity = Depends(current_system_admin), db: AsyncSession = Depends(get_session)):
+    app = await db.scalar(select(OrganizationApplication).where(OrganizationApplication.id == application_id).with_for_update())
     if not app:
         raise HTTPException(404, "Application not found")
     if app.status != "pending_review":
@@ -218,8 +225,7 @@ async def admin_update_application(application_id: uuid.UUID, body: AdminApplica
 
 
 @router.delete("/admin/hospital-applications/{application_id}", tags=["Hospitals"], status_code=204)
-async def admin_delete_application(application_id: uuid.UUID, identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
-    require_system_admin(identity)
+async def admin_delete_application(application_id: uuid.UUID, identity: Identity = Depends(current_system_admin), db: AsyncSession = Depends(get_session)):
     app = await db.get(OrganizationApplication, application_id)
     if not app:
         raise HTTPException(404, "Application not found")

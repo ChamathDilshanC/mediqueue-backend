@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     supabase_anon_key: str | None = None
     supabase_jwt_secret: str | None = None
     supabase_jwks_url: str | None = None
+    jwks_cache_seconds: int = 600
+    # Comma-separated platform operator emails. Each must also be confirmed in Supabase.
+    system_admin_emails: str = ""
     auth_dev_header_enabled: bool = False
     dev_tenant_id: str = "00000000-0000-0000-0000-000000000001"
     dev_branch_id: str = "00000000-0000-0000-0000-000000000002"
@@ -34,6 +37,11 @@ class Settings(BaseSettings):
         if "ssl" not in url.query:
             url = url.update_query_dict({"ssl": "require"})
         return url.render_as_string(hide_password=False)
+
+    @property
+    def system_admins(self) -> frozenset[str]:
+        """Normalized allowlist; an empty value grants nobody platform access."""
+        return frozenset(email.strip().lower() for email in self.system_admin_emails.split(",") if email.strip())
 
 @lru_cache
 def get_settings() -> Settings:

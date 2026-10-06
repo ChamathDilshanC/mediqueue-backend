@@ -103,6 +103,20 @@ database passwords, service-role keys, or OAuth secrets.
 
 ## Documentation and deployment
 
+### Release 0017: payment integrity and schema ownership
+
+- Run `python -m alembic upgrade head` (revision `0017_payment_integrity`) before
+  deploying. The API no longer changes the PostgreSQL schema at startup;
+  `/health/ready` returns 503 until the database is at the expected revision.
+- Set `SYSTEM_ADMIN_EMAILS` in Vercel. Hospital review endpoints and
+  `POST /v1/hospitals` accept only these confirmed emails; other users apply via
+  `POST /v1/hospital-applications`.
+- Stripe payments are bound to one Checkout Session and its amount. A payment that
+  does not match the current quotation becomes `REVIEW_REQUIRED`; money for a
+  cancelled/rejected appointment becomes `REFUND_REQUIRED`. Staff settle both with
+  `POST /v1/appointments/{id}/payment-resolution` (`REFUND` or `ACCEPT`).
+- `DELETE /v1/appointments/{id}` now cancels and retains the appointment.
+
 - Local portal: <http://127.0.0.1:8000/docs>
 - Live portal: <https://mediqueue-backend-eta.vercel.app/docs>
 - Swagger: `/swagger`

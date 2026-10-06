@@ -23,8 +23,8 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Principal, current_principal, require_scope
-from .db import get_session, ensure_sqlite_discovery_columns
-from .models import Queue, QueueToken, Visit, Patient, Tenant, AuditEvent, OutboxEvent, IdempotencyKey, ManagementRecord, PatientAccount
+from .db import SCHEMA_REVISION, get_session, ensure_sqlite_discovery_columns
+from .models import Queue, QueueToken, Visit, Patient, Tenant, AuditEvent, OutboxEvent, IdempotencyKey
 from .settings import get_settings
 
 from contextlib import asynccontextmanager
@@ -32,111 +32,37 @@ from contextlib import asynccontextmanager
 logger = logging.getLogger("mediqueue.api")
 
 
+async def schema_problem(session: AsyncSession) -> str | None:
+    """Describe why the PostgreSQL schema does not match this release, or None when it does."""
+    if session.bind.dialect.name != "postgresql":
+        return None
+    try:
+        revision = await session.scalar(text("SELECT version_num FROM alembic_version"))
+    except SQLAlchemyError:
+        await session.rollback()
+        return "Database has no Alembic revision; run `alembic upgrade head`"
+    if revision != SCHEMA_REVISION:
+        return f"Database schema is at {revision}; this release needs {SCHEMA_REVISION}. Run `alembic upgrade head`"
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Ensure newly added columns exist in the database table if migrations haven't run."""
+    """Upgrade local SQLite sidecars; PostgreSQL schema changes belong to Alembic only.
+
+    Startup DDL used to run (and silently fail) on every cold start. Production schemas are
+    now migrated explicitly, and a stale schema is logged here and reported by /health/ready.
+    """
     try:
         async for session in get_session():
             if session.bind.dialect.name == "sqlite":
                 await session.run_sync(lambda sync_session: ensure_sqlite_discovery_columns(sync_session.connection()))
                 await session.commit()
-            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'STAFF'"))
-            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS review_reason VARCHAR(500) NOT NULL DEFAULT ''"))
-            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(200)"))
-            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ"))
-            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS quotation JSONB NOT NULL DEFAULT '[]'::jsonb"))
-            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS payment_method VARCHAR(30)"))
-            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) NOT NULL DEFAULT 'UNPAID'"))
-            await session.execute(text("ALTER TABLE scheduling.appointment ADD COLUMN IF NOT EXISTS payment_reference VARCHAR(200)"))
-            await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS address VARCHAR(500) NOT NULL DEFAULT ''"))
-            await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS phone VARCHAR(40) NOT NULL DEFAULT ''"))
-            await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION"))
-            await session.execute(text("ALTER TABLE iam.branch ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION"))
-            await session.execute(text("ALTER TABLE queue.queue ADD COLUMN IF NOT EXISTS average_service_minutes INTEGER NOT NULL DEFAULT 5"))
-            await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS code VARCHAR(20) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''"))
-            await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS location VARCHAR(200) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS head_of_dept VARCHAR(200) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE scheduling.department ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE"))
-            await session.execute(text("ALTER TABLE scheduling.doctor ADD COLUMN IF NOT EXISTS quotation_template JSONB NOT NULL DEFAULT '[]'::jsonb"))
-            await session.execute(text("ALTER TABLE scheduling.room ADD COLUMN IF NOT EXISTS ward_id UUID REFERENCES scheduling.ward(id)"))
-            await session.execute(text("ALTER TABLE scheduling.bed ADD COLUMN IF NOT EXISTS room_id UUID REFERENCES scheduling.room(id)"))
-            await session.execute(text("ALTER TABLE scheduling.room ADD COLUMN IF NOT EXISTS department_id UUID"))
-            await session.execute(text("ALTER TABLE queue.queue ADD COLUMN IF NOT EXISTS department_id UUID"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS mrn VARCHAR(50) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS first_name VARCHAR(100) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS last_name VARCHAR(100) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS gender VARCHAR(20) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR(30) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS nic VARCHAR(30) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS mobile VARCHAR(30) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS email VARCHAR(254) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS blood_group VARCHAR(10) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS address_line_1 VARCHAR(200) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS city VARCHAR(100) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS allergies VARCHAR(500) DEFAULT ''"))
-            await session.execute(text("ALTER TABLE queue.patient ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'ACTIVE'"))
-            await session.execute(text("""
-                CREATE TABLE IF NOT EXISTS scheduling.ward (
-                    id UUID PRIMARY KEY,
-                    tenant_id UUID NOT NULL,
-                    branch_id UUID NOT NULL,
-                    department_id UUID NOT NULL,
-                    ward_code VARCHAR(50) NOT NULL,
-                    name VARCHAR(200) NOT NULL,
-                    ward_type VARCHAR(50) DEFAULT 'General',
-                    floor VARCHAR(50) DEFAULT '',
-                    building VARCHAR(100) DEFAULT '',
-                    gender_type VARCHAR(20) DEFAULT 'Mixed',
-                    age_group VARCHAR(50) DEFAULT 'All',
-                    bed_capacity INTEGER DEFAULT 30,
-                    in_charge_staff_id VARCHAR(200) DEFAULT '',
-                    phone_extension VARCHAR(50) DEFAULT '',
-                    description TEXT DEFAULT '',
-                    status VARCHAR(20) DEFAULT 'ACTIVE',
-                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-                );
-            """))
-            await session.execute(text("""
-                CREATE TABLE IF NOT EXISTS scheduling.bed (
-                    id UUID PRIMARY KEY,
-                    tenant_id UUID NOT NULL,
-                    branch_id UUID NOT NULL,
-                    ward_id UUID NOT NULL,
-                    bed_number VARCHAR(50) NOT NULL,
-                    bed_type VARCHAR(50) DEFAULT 'STANDARD',
-                    status VARCHAR(20) DEFAULT 'AVAILABLE',
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-                );
-            """))
-            await session.execute(text("""
-                CREATE TABLE IF NOT EXISTS scheduling.ward_admission (
-                    id UUID PRIMARY KEY,
-                    tenant_id UUID NOT NULL,
-                    branch_id UUID NOT NULL,
-                    patient_id UUID NOT NULL,
-                    ward_id UUID NOT NULL,
-                    bed_id UUID,
-                    admitted_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                    discharged_at TIMESTAMPTZ,
-                    admission_status VARCHAR(30) DEFAULT 'ADMITTED',
-                    assigned_by VARCHAR(200) DEFAULT '',
-                    discharged_by VARCHAR(200) DEFAULT '',
-                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-                );
-            """))
-            await session.execute(text("ALTER TABLE scheduling.ward_admission ADD COLUMN IF NOT EXISTS planned_discharge_at TIMESTAMPTZ"))
-            await session.execute(text("ALTER TABLE scheduling.ward_admission ADD COLUMN IF NOT EXISTS bed_assigned_at TIMESTAMPTZ"))
-            connection = await session.connection()
-            await connection.run_sync(lambda sync: ManagementRecord.__table__.create(sync, checkfirst=True))
-            await connection.run_sync(lambda sync: PatientAccount.__table__.create(sync, checkfirst=True))
-            await session.execute(text("ALTER TABLE queue.queue ADD COLUMN IF NOT EXISTS service_type VARCHAR(30) NOT NULL DEFAULT 'GENERAL'"))
-            await session.execute(text("ALTER TABLE queue.queue ADD COLUMN IF NOT EXISTS room_id UUID REFERENCES scheduling.room(id)"))
-            await session.commit()
+            elif problem := await schema_problem(session):
+                logger.error("Schema check failed: %s", problem)
             break
-    except Exception as exc:
-        logger.warning("Auto column migration check skipped: %s", exc)
+    except (SQLAlchemyError, OSError) as exc:
+        logger.error("Startup schema check could not reach the database: %s", exc)
     yield
 
 
@@ -246,10 +172,14 @@ async def readiness(db: AsyncSession = Depends(get_session)) -> ReadinessRespons
     """Verify that the API can reach its configured PostgreSQL database."""
     try:
         await db.execute(text("SELECT 1"))
+        problem = await schema_problem(db)
     except (SQLAlchemyError, OSError, RuntimeError, ValueError) as exc:
         await db.rollback()
         logger.exception("Database readiness check failed")
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Database unavailable") from exc
+    if problem:
+        logger.error("Readiness: %s", problem)
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Database schema is not migrated")
     return ReadinessResponse()
 
 @app.get(

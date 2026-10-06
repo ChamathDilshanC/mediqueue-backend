@@ -16,6 +16,7 @@ from .schemas import AppointmentInput, AppointmentPatch
 from .management import Input, output
 from .models import Appointment, Bed, Branch, Doctor, ManagementRecord, Patient, PatientAccount, Schedule, Tenant, Ward, WardAdmission
 from .ward_map import stay_summary
+from .payments import CURRENCY, PAYMENT_LOCKED, configure_stripe, invalidate_checkout, quotation_minor_units
 from .settings import get_settings
 
 router = APIRouter(prefix="/v1/patient", tags=["Patient portal"])
@@ -186,28 +187,30 @@ async def cancel(appointment_id: uuid.UUID, identity: Identity = Depends(current
 @router.post("/appointments/{appointment_id}/payment")
 async def appointment_payment(appointment_id: uuid.UUID, body: PaymentChoice,
                               identity: Identity = Depends(current_identity), db: AsyncSession = Depends(get_session)):
-    row = await db.get(Appointment, appointment_id)
+    row = await db.scalar(select(Appointment).where(Appointment.id == appointment_id).with_for_update())
     if not row:
         raise HTTPException(404, "Appointment not found")
     link = await account(identity, db, row.tenant_id)
     if link.patient_id != row.patient_id:
         raise HTTPException(404, "Appointment not found")
-    if row.status not in {"PENDING", "BOOKED", "CHECKED_IN"}:
-        raise HTTPException(409, "Payment is not available for this appointment")
-    total = sum(Decimal(str(item.get("amount", 0))) for item in (row.quotation or []))
-    if total <= 0:
-        raise HTTPException(409, "The hospital has not added a quotation yet")
     if row.payment_status == "PAID":
         return {"status": "PAID", "checkout_url": None}
+    if row.payment_status in PAYMENT_LOCKED:
+        raise HTTPException(409, "This payment is being reviewed by the hospital")
+    if row.status not in {"PENDING", "BOOKED", "CHECKED_IN"}:
+        raise HTTPException(409, "Payment is not available for this appointment")
+    amount = quotation_minor_units(row.quotation)
+    if amount <= 0:
+        raise HTTPException(409, "The hospital has not added a quotation yet")
+    # Only one checkout may ever be payable: close the previous one before replacing it.
+    await invalidate_checkout(row)
     if body.method == "PAY_AT_HOSPITAL":
         row.payment_method = body.method
         row.payment_status = "PAY_AT_HOSPITAL"
         await db.commit()
         return {"status": row.payment_status, "checkout_url": None}
     settings = get_settings()
-    if not settings.stripe_secret_key:
-        raise HTTPException(503, "Online payments are not configured by this hospital")
-    stripe.api_key = settings.stripe_secret_key
+    configure_stripe()
     try:
         checkout = await asyncio.to_thread(
             stripe.checkout.Session.create,
@@ -215,23 +218,28 @@ async def appointment_payment(appointment_id: uuid.UUID, body: PaymentChoice,
             success_url=settings.stripe_success_url,
             cancel_url=settings.stripe_cancel_url,
             client_reference_id=str(row.id),
-            timeout=10,
+            metadata={"appointment_id": str(row.id), "amount": str(amount)},
             line_items=[{
                 "price_data": {
-                    "currency": "lkr",
+                    "currency": CURRENCY,
                     "product_data": {"name": "MediQueue appointment quotation"},
-                    "unit_amount": int(total * 100),
+                    "unit_amount": amount,
                 },
                 "quantity": 1,
             }],
         )
     except stripe.error.StripeError as exc:
+        await db.commit()  # keep the closed previous checkout recorded
         raise HTTPException(502, "Stripe could not create the payment session") from exc
     checkout_url = getattr(checkout, "url", None)
-    if not checkout_url:
+    session_id = getattr(checkout, "id", None)
+    if not checkout_url or not session_id:
+        await db.commit()
         raise HTTPException(502, "Stripe returned an invalid payment session")
     row.payment_method = "ONLINE"
     row.payment_status = "CHECKOUT_STARTED"
-    row.payment_reference = getattr(checkout, "id", None)
+    row.checkout_session_id = session_id
+    row.payment_amount = amount
+    row.payment_reference = None
     await db.commit()
     return {"status": row.payment_status, "checkout_url": checkout_url}

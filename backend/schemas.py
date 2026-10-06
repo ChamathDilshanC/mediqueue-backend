@@ -158,6 +158,7 @@ class MembershipPatch(Input):
 
 class HospitalRegister(BranchInput):
     branch_name: Name = "Main branch"
+    admin_user_id: uuid.UUID | None = None
 
 
 class OrganizationApplicationInput(Input):
@@ -185,6 +186,13 @@ class AdminApplicationPatch(Input):
 
 
 class ScopedOutput(HospitalOutput):
+    tenant_id: uuid.UUID
+    branch_id: uuid.UUID
+
+
+class BranchRecordOutput(Output):
+    """Branch-scoped records that have no display name (shifts, attendance, tasks)."""
+    id: uuid.UUID
     tenant_id: uuid.UUID
     branch_id: uuid.UUID
 
@@ -356,6 +364,11 @@ class AppointmentPatch(Input):
     quotation: list[dict] | None = None
 
 
+class PaymentResolution(Input):
+    action: Literal["REFUND", "ACCEPT"]
+    note: str = Field(default="", max_length=500)
+
+
 class AppointmentOutput(VisitOutput):
     source: str = "STAFF"
     review_reason: str = ""
@@ -515,7 +528,7 @@ class StaffShiftInput(Input):
         return self
 
 
-class StaffShiftOutput(ScopedOutput):
+class StaffShiftOutput(BranchRecordOutput):
     doctor_id: uuid.UUID | None = None
     nurse_id: uuid.UUID | None = None
     attendant_id: uuid.UUID | None = None
@@ -535,7 +548,7 @@ class AttendanceInput(Input):
     notes: str = Field(default="", max_length=500)
 
 
-class AttendanceOutput(ScopedOutput):
+class AttendanceOutput(BranchRecordOutput):
     shift_id: uuid.UUID
     attendance_status: str
     check_in_at: datetime | None = None
@@ -568,7 +581,7 @@ class WardTaskInput(Input):
         return self
 
 
-class WardTaskOutput(ScopedOutput):
+class WardTaskOutput(BranchRecordOutput):
     ward_id: uuid.UUID
     patient_id: uuid.UUID | None = None
     doctor_id: uuid.UUID | None = None

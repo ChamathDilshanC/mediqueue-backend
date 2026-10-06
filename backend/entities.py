@@ -1,4 +1,5 @@
 """Tenant-scoped setup, scheduling, patient and read-only history endpoints."""
+import math
 import uuid
 from datetime import datetime, timezone
 
@@ -9,10 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Principal, current_principal, require_role
 from .db import get_session
 from .identity import audit
+from .payments import PAYMENT_LOCKED, REFUNDABLE, invalidate_checkout, refund_online_payment
 from .models import (Appointment, AuditEvent, Attendant, Bed, Branch, Department, Doctor, Nurse,
                      Patient, Queue, QueueToken, Room, Schedule, StaffAttendance, StaffShift,
                      Tenant, Visit, Ward, WardAdmission, WardTask)
-from .schemas import (ERROR_RESPONSES, AppointmentInput, AppointmentOutput, AppointmentPatch, AuditOutput,
+from .schemas import (ERROR_RESPONSES, AppointmentInput, AppointmentOutput, AppointmentPatch, AuditOutput, PaymentResolution,
     BedInput, BedOutput, DepartmentInput, DepartmentOutput, DoctorInput, DoctorOutput, HospitalInput, PatientInput, PatientOutput, QueueInput,
     QueueOutput, RoomInput, RoomOutput, ScheduleInput, ScheduleOutput, ScopedOutput, VisitInput, VisitOutput,
     WardInput, WardOutput, WardAdmissionInput,     WardAdmissionOutput, StaffInput, NurseOutput, AttendantOutput, StaffShiftInput,
@@ -156,6 +158,20 @@ async def validate_entity(model, data, p, db, item_id=None):
             await scoped(Nurse, data["nurse_id"], p, db)
         if data.get("attendant_id"):
             await scoped(Attendant, data["attendant_id"], p, db)
+        # Verification is a separate, audited command (POST /ward-tasks/{id}/verify):
+        # clients can neither set it nor alter a verified task.
+        old_task = await scoped(WardTask, item_id, p, db) if item_id else None
+        if old_task and old_task.status == "VERIFIED":
+            raise HTTPException(409, "Verified tasks are immutable")
+        if data["status"] == "VERIFIED":
+            raise HTTPException(422, "Use the verify action to verify a completed task")
+        data["verified_by"] = ""
+        data["verified_at"] = None
+        if data["status"] == "COMPLETED" and not data.get("completed_at"):
+            data["completed_at"] = (old_task.completed_at if old_task and old_task.completed_at
+                                    else datetime.now(timezone.utc))
+        elif data["status"] != "COMPLETED":
+            data["completed_at"] = None
     elif model is Patient:
         # Patients are shared inside a hospital; serialize registrations across branches.
         await db.scalar(select(Tenant).where(Tenant.id == uuid.UUID(p.tenant_id)).with_for_update())
@@ -200,18 +216,19 @@ async def discharge_admission(item_id: uuid.UUID, p: Principal = Depends(current
     return admission
 
 
+# Each model appears once: a repeated dict key silently replaces the earlier entry.
 DEPENDENCIES = {
-    Department: [(Doctor, Doctor.department_id), (Room, Room.department_id), (Ward, Ward.department_id)],
-    Room: [(Schedule, Schedule.room_id)],
+    Department: [(Doctor, Doctor.department_id), (Room, Room.department_id), (Ward, Ward.department_id),
+                 (Queue, Queue.department_id)],
+    Room: [(Schedule, Schedule.room_id), (Bed, Bed.room_id), (Queue, Queue.room_id)],
     Doctor: [(Schedule, Schedule.doctor_id), (StaffShift, StaffShift.doctor_id), (WardTask, WardTask.doctor_id)],
-    Ward: [(Bed, Bed.ward_id), (WardAdmission, WardAdmission.ward_id)],
+    Ward: [(Bed, Bed.ward_id), (WardAdmission, WardAdmission.ward_id), (Room, Room.ward_id), (WardTask, WardTask.ward_id)],
     Bed: [(WardAdmission, WardAdmission.bed_id)],
     Schedule: [(Appointment, Appointment.schedule_id)],
     Queue: [(QueueToken, QueueToken.queue_id)],
     Nurse: [(StaffShift, StaffShift.nurse_id), (WardTask, WardTask.nurse_id)],
     Attendant: [(StaffShift, StaffShift.attendant_id), (WardTask, WardTask.attendant_id)],
     StaffShift: [(StaffAttendance, StaffAttendance.shift_id)],
-    Ward: [(WardTask, WardTask.ward_id)],
     Patient: [(Visit, Visit.patient_id), (Appointment, Appointment.patient_id), (WardAdmission, WardAdmission.patient_id), (WardTask, WardTask.patient_id)],
 }
 
@@ -375,7 +392,7 @@ async def verify_ward_task(item_id: uuid.UUID, p: Principal = Depends(current_pr
     require_role(p, "admin", "staff")
     await lock_branch(p, db)
     task = await scoped(WardTask, item_id, p, db, lock=True)
-    if task.status in ("CANCELLED", "ASSIGNED"):
+    if task.status != "COMPLETED":
         raise HTTPException(409, "Only completed tasks can be verified")
     task.status = "VERIFIED"
     task.verified_by = p.subject
@@ -480,29 +497,61 @@ async def create_appointment(body, p, db, patient_requested=False, quotation_ite
     return row
 
 
+def normalized_quotation(items):
+    if len(items) > 50:
+        raise HTTPException(422, "A quotation may contain at most 50 items")
+    quotation = []
+    for item in items:
+        if not isinstance(item.get("name"), str) or not item["name"].strip():
+            raise HTTPException(422, "Every quotation item needs a name")
+        try:
+            amount = float(item.get("amount", 0))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, "Quotation amounts must be numbers") from exc
+        if not math.isfinite(amount) or amount < 0:
+            raise HTTPException(422, "Quotation amounts must be finite and not negative")
+        quotation.append({"name": item["name"].strip(), "amount": round(amount, 2)})
+    return quotation
+
+
+def payment_audit(db, p, action, row, **details):
+    db.add(AuditEvent(tenant_id=uuid.UUID(p.tenant_id), actor_id=p.subject, action=action, entity_id=row.id,
+                      payload={"branch_id": p.branch_id, "payment_status": row.payment_status, **details}))
+
+
+async def release_payment(row, p, db):
+    """A cancelled/rejected appointment must not keep money or a payable checkout."""
+    if row.payment_status == "CHECKOUT_STARTED":
+        try:
+            await invalidate_checkout(row)
+        except HTTPException:
+            # Completed or Stripe unreachable: a late payment for a closed appointment is
+            # flagged REFUND_REQUIRED by the webhook, so cancellation can still proceed.
+            pass
+    elif row.payment_status in REFUNDABLE:
+        row.payment_status = "REFUND_REQUIRED"
+        payment_audit(db, p, "appointment.refund_required", row)
+
+
 @router.patch("/appointments/{appointment_id}", tags=["Appointments"], response_model=AppointmentOutput)
 async def update_appointment(appointment_id: uuid.UUID, body: AppointmentPatch, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
     require_role(p, "admin", "staff", "reception")
     await lock_branch(p, db)
     row = await scoped(Appointment, appointment_id, p, db, lock=True)
-    if body.quotation is not None:
-        if len(body.quotation) > 50:
-            raise HTTPException(422, "A quotation may contain at most 50 items")
-        quotation = []
-        for item in body.quotation:
-            if not isinstance(item.get("name"), str) or not item["name"].strip():
-                raise HTTPException(422, "Every quotation item needs a name")
-            try:
-                amount = float(item.get("amount", 0))
-            except (TypeError, ValueError) as exc:
-                raise HTTPException(422, "Quotation amounts must be numbers") from exc
-            if amount < 0:
-                raise HTTPException(422, "Quotation amounts cannot be negative")
-            quotation.append({"name": item["name"].strip(), "amount": round(amount, 2)})
-        row.quotation = quotation
     allowed = {"PENDING": {"BOOKED", "REJECTED", "CANCELLED"}, "BOOKED": {"CHECKED_IN", "CANCELLED", "NO_SHOW"}, "CHECKED_IN": {"COMPLETED"}}
     if body.status != row.status and body.status not in allowed.get(row.status, set()):
         raise HTTPException(409, "Invalid appointment transition")
+    quotation_changed = False
+    if body.quotation is not None:
+        quotation = normalized_quotation(body.quotation)
+        if quotation != (row.quotation or []):
+            if row.payment_status in PAYMENT_LOCKED:
+                raise HTTPException(409, "The quotation is locked because a payment was received")
+            # An open checkout was priced from the old quotation; it must never settle the new one.
+            await invalidate_checkout(row)
+            row.quotation = quotation
+            quotation_changed = True
+            audit(db, p, "appointment.quotation_updated", row.id)
     if body.status != row.status:
         if body.status in {"BOOKED", "REJECTED"}:
             if body.status == "REJECTED" and not body.reason.strip():
@@ -514,23 +563,47 @@ async def update_appointment(appointment_id: uuid.UUID, body: AppointmentPatch, 
             row.reviewed_at = datetime.now(timezone.utc)
             row.reviewed_by = p.subject
             row.review_reason = body.reason.strip()
+        if body.status in {"CANCELLED", "REJECTED"}:
+            await release_payment(row, p, db)
         row.status = body.status
         audit(db, p, f"appointment.{body.status.lower()}", row.id)
         await db.commit()
-    elif body.quotation is not None:
+    elif quotation_changed:
         await db.commit()
     return row
 
 
 @router.delete("/appointments/{appointment_id}", tags=["Appointments"], status_code=204)
 async def delete_appointment(appointment_id: uuid.UUID, p: Principal = Depends(current_principal), db: AsyncSession = Depends(get_session)):
+    """Appointments are never erased: this cancels a pending/booked appointment and keeps its history."""
     require_role(p, "admin", "staff")
+    row = await scoped(Appointment, appointment_id, p, db)
+    if row.status not in {"PENDING", "BOOKED"}:
+        raise HTTPException(409, "Appointment history must be retained; only pending or booked appointments can be cancelled")
+    await update_appointment(appointment_id, AppointmentPatch(status="CANCELLED", reason="Cancelled by staff"), p, db)
+    return Response(status_code=204)
+
+
+@router.post("/appointments/{appointment_id}/payment-resolution", tags=["Appointments"], response_model=AppointmentOutput)
+async def resolve_payment(appointment_id: uuid.UUID, body: PaymentResolution, p: Principal = Depends(current_principal),
+                          db: AsyncSession = Depends(get_session)):
+    """Settle flagged payments: refund money for cancelled/mismatched bookings, or accept a reviewed payment."""
+    require_role(p, "admin", "reception")
     await lock_branch(p, db)
     row = await scoped(Appointment, appointment_id, p, db, lock=True)
-    audit(db, p, "appointment.deleted", row.id)
-    await db.delete(row)
+    if body.action == "ACCEPT":
+        if row.payment_status != "REVIEW_REQUIRED" or row.status in {"CANCELLED", "REJECTED"}:
+            raise HTTPException(409, "Only a reviewed payment for an active appointment can be accepted")
+        row.payment_status = "PAID"
+        payment_audit(db, p, "payment.accepted", row, note=body.note)
+    else:
+        if row.payment_status not in {"REFUND_REQUIRED", "REVIEW_REQUIRED"}:
+            raise HTTPException(409, "This appointment has no payment awaiting a refund")
+        refund_id = await refund_online_payment(row) if row.payment_method == "ONLINE" else None
+        row.payment_status = "REFUNDED"
+        payment_audit(db, p, "payment.refunded", row, note=body.note, refund_id=refund_id)
     await db.commit()
-    return Response(status_code=204)
+    return row
 
 
 @router.get("/audit-events", tags=["Audit"], response_model=list[AuditOutput])

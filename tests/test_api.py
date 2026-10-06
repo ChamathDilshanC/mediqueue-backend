@@ -20,6 +20,8 @@ from backend.settings import Settings
 
 SECRET = "test-only-signing-key-that-is-not-a-deployment-secret"
 AUTH_URL = "https://identity.example.test"
+SYSTEM_ADMIN_EMAIL = "ops@mediqueue.test"
+SYSTEM_ADMIN = uuid.UUID("00000000-0000-4000-8000-00000000a001")
 
 
 def token(user_id, **overrides):
@@ -58,7 +60,16 @@ async def api(monkeypatch):
             yield db
 
     settings = Settings(_env_file=None, supabase_url=AUTH_URL, supabase_jwt_secret=SECRET,
-                        supabase_anon_key="public-test-key", auth_dev_header_enabled=False)
+                        supabase_anon_key="public-test-key", auth_dev_header_enabled=False,
+                        system_admin_emails=f" {SYSTEM_ADMIN_EMAIL.upper()} , other-ops@mediqueue.test")
+
+    async def auth_user(access_token):
+        # Stand-in for Supabase GET /auth/v1/user: confirmation comes from the provider record.
+        claims = jwt.get_unverified_claims(access_token)
+        return {"id": claims["sub"], "email": claims.get("email"),
+                "email_confirmed_at": claims.get("test_confirmed_at", "2026-01-01T00:00:00Z")}
+
+    monkeypatch.setattr(auth, "fetch_auth_user", auth_user)
     monkeypatch.setattr(auth, "get_settings", lambda: settings)
     monkeypatch.setattr(identity, "get_settings", lambda: settings)
     app.dependency_overrides[get_session] = session
@@ -72,10 +83,17 @@ async def api(monkeypatch):
     await engine.dispose()
 
 
+def system_admin_headers(**claims):
+    return {"Authorization": f"Bearer {token(SYSTEM_ADMIN, email=SYSTEM_ADMIN_EMAIL, **claims)}"}
+
+
 async def onboard(client, name="Test Hospital"):
+    """A verified hospital, provisioned by a system admin for a registered user."""
     user = uuid.uuid4()
     headers = {"Authorization": f"Bearer {token(user)}"}
-    result = await client.post("/v1/hospitals", headers=headers, json={"name": name})
+    assert (await client.get("/v1/auth/me", headers=headers)).status_code == 200
+    result = await client.post("/v1/hospitals", headers=system_admin_headers(),
+                               json={"name": name, "admin_user_id": str(user)})
     assert result.status_code == 201, result.text
     data = result.json()
     headers.update({"X-Tenant-ID": data["hospital"]["id"], "X-Branch-ID": data["branch"]["id"]})

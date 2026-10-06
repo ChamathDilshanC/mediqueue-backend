@@ -101,6 +101,7 @@ class OutboxEvent(Base):
     event_type: Mapped[str] = mapped_column(String(120)); payload: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"), default=dict)
     attempts: Mapped[int] = mapped_column(Integer, default=0); available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 class StripeWebhookEvent(Base):
     __tablename__ = "stripe_webhook_event"; __table_args__ = {"schema": "notifications"}
@@ -229,6 +230,10 @@ class Appointment(Base):
     payment_method: Mapped[str | None] = mapped_column(String(30), nullable=True)
     payment_status: Mapped[str] = mapped_column(String(20), default="UNPAID", server_default="UNPAID")
     payment_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # The single Stripe Checkout Session allowed to settle this appointment, and the
+    # amount (LKR cents) it was created for. Webhooks must match both.
+    checkout_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    payment_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
