@@ -76,7 +76,7 @@ app = FastAPI(
         "`/health/ready` for database readiness, and `/docs` or `/redoc` for the "
         "interactive API reference."
     ),
-    version="1.1.0",
+    version="1.2.0",
     docs_url="/swagger",
     contact={"name": "ChamathDilshanC"},
     license_info={"name": "Proprietary"},
